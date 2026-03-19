@@ -1,43 +1,90 @@
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 import os
-from functools import lru_cache
-
+import logging
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator
-
+from typing import Generator
+from src.schemas.models import Base, UserInDB, Course, Module, Lesson, Group, Enrollment, StudentProgress, Assignment, AssignmentSubmission, Message, LessonMaterial
+from passlib.context import CryptContext
 
 load_dotenv()
 
+# Configure logging
+logger = logging.getLogger(__name__)
 
-class Settings(BaseModel):
-    app_name: str = "Smart Home Resource Monitoring API"
-    app_version: str = "0.1.0"
-    environment: str = "development"
-    api_v1_prefix: str = "/api/v1"
-    enable_docs: bool = True
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
-    postgres_url: str = "postgresql+psycopg2://monitor:monitor@localhost:5432/monitoring_db"
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
-        if isinstance(value, list):
-            return value
-        if not isinstance(value, str) or not value.strip():
-            return []
-        return [origin.strip() for origin in value.split(",") if origin.strip()]
+POSTGRES_URL = os.getenv("POSTGRES_URL")
 
+# Azure OpenAI Configuration
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
 
-@lru_cache
-def get_settings() -> Settings:
-    return Settings(
-        app_name=os.getenv("APP_NAME", "Smart Home Resource Monitoring API"),
-        app_version=os.getenv("APP_VERSION", "0.1.0"),
-        environment=os.getenv("ENVIRONMENT", "development"),
-        api_v1_prefix=os.getenv("API_V1_PREFIX", "/api/v1"),
-        enable_docs=os.getenv("ENABLE_DOCS", "true").lower() == "true",
-        cors_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000"),
-        postgres_url=os.getenv(
-            "POSTGRES_URL",
-            "postgresql+psycopg2://monitor:monitor@localhost:5432/monitoring_db",
-        ),
-    )
+# Database setup with connection pooling
+engine = create_engine(
+    POSTGRES_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,
+    pool_recycle=3600
+)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+logger.info("Database connection initialized")
+
+def get_db() -> Generator:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def init_db():
+    """Initialize the database and create tables if they don't exist."""
+    logger.info("Initializing the database...")
+    Base.metadata.create_all(bind=engine)
+    create_initial_admin()
+
+def create_initial_admin():
+    """Create initial admin user from environment variables if configured."""
+    # Get admin credentials from environment variables
+    admin_email = os.getenv("INITIAL_ADMIN_EMAIL")
+    admin_password = os.getenv("INITIAL_ADMIN_PASSWORD")
+    admin_name = os.getenv("INITIAL_ADMIN_NAME", "Admin")
+    
+    if not admin_email or not admin_password:
+        logger.info("No initial admin credentials configured (INITIAL_ADMIN_EMAIL/INITIAL_ADMIN_PASSWORD)")
+        return
+    
+    db = SessionLocal()
+    try:
+        # Check if admin already exists
+        admin = db.query(UserInDB).filter(UserInDB.email == admin_email).first()
+        if not admin:
+            logger.info(f"Creating initial admin user: {admin_name}")
+            hashed_password = pwd_context.hash(admin_password)
+            admin_user = UserInDB(
+                email=admin_email,
+                name=admin_name,
+                hashed_password=hashed_password,
+                role="admin",
+                is_active=True
+            )
+            db.add(admin_user)
+            db.commit()
+            logger.info("Initial admin created successfully")
+        else:
+            logger.info("Admin user already exists")
+    except Exception as e:
+        logger.error(f"Error creating initial admin: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+def reset_db():
+    logger.warning("Dropping all tables...")
+    Base.metadata.drop_all(bind=engine)
+    logger.info("Recreating all tables...")
+    Base.metadata.create_all(bind=engine)

@@ -13,6 +13,9 @@ __pycache__/
 *.pyzwzwzw
 .env
 
+backend-v2/
+# backend-go/
+
 venv/
 .venv/
 .env

@@ -1,4 +1,4 @@
-"""Groq API client for transforming resident tickets into daily tasks."""
+"""AI client for transforming resident tickets into daily tasks."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from typing import Any
 
 import httpx
 
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemma-3-1b-it")
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3-32b")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 logger = logging.getLogger(__name__)
@@ -48,6 +50,77 @@ Rules:
 - classification_reason: concise explanation based on words/intent in ticket
 """
 
+GEMINI_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "title": {"type": "STRING"},
+        "description": {"type": "STRING"},
+        "category": {"type": "STRING", "enum": ["inspection", "repair", "meter", "complaint", "report"]},
+        "priority": {"type": "STRING", "enum": ["low", "medium", "high", "critical"]},
+        "building": {"type": "STRING"},
+        "apartment": {"type": "STRING", "nullable": True},
+        "due_time": {"type": "STRING"},
+        "ai_comment": {"type": "STRING"},
+        "complaint_type": {"type": "STRING", "enum": ["neighbors", "water", "electricity", "schedule", "general", "recommendation"]},
+        "classification_reason": {"type": "STRING"},
+    },
+    "required": [
+        "title",
+        "description",
+        "category",
+        "priority",
+        "building",
+        "due_time",
+        "ai_comment",
+        "complaint_type",
+        "classification_reason",
+    ],
+}
+
+
+def _call_gemini_structured(system_prompt: str, user_prompt: str, api_key: str) -> str:
+    with httpx.Client(timeout=30.0) as client:
+        response = client.post(
+            GEMINI_API_URL.format(model=GEMINI_MODEL),
+            params={"key": api_key},
+            headers={"Content-Type": "application/json"},
+            json={
+                "system_instruction": {"parts": [{"text": system_prompt}]},
+                "contents": [{"parts": [{"text": user_prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "responseMimeType": "application/json",
+                    "responseSchema": GEMINI_RESPONSE_SCHEMA,
+                },
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        return (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [{}])[0].get("text", "")
+
+
+def _call_groq(system_prompt: str, user_prompt: str, api_key: str) -> str:
+    with httpx.Client(timeout=30.0) as client:
+        resp = client.post(
+            GROQ_API_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": GROQ_MODEL,
+                "temperature": 0.2,
+                "max_tokens": 512,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+
 
 def transform_ticket_to_task(
     subject: str,
@@ -57,7 +130,7 @@ def transform_ticket_to_task(
     apartment_id: str,
     building_name: str,
 ) -> dict[str, Any] | None:
-    """Call Groq Qwen3-32B to transform a ticket into a task structure."""
+    """Call AI model to transform a ticket into a task structure."""
     logger.info(
         "ticket_ai_classification_start subject=%r apartment=%s building=%s",
         subject[:120],
@@ -65,9 +138,10 @@ def transform_ticket_to_task(
         building_name,
     )
 
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        logger.warning("ticket_ai_classification_skip reason=missing_groq_api_key")
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    groq_api_key = os.getenv("GROQ_API_KEY")
+    if not gemini_api_key and not groq_api_key:
+        logger.warning("ticket_ai_classification_skip reason=missing_ai_api_keys expected=GEMINI_API_KEY_or_GROQ_API_KEY")
         return None
 
     user_content = f"""Ticket:
@@ -81,26 +155,12 @@ Building: {building_name}
 Convert to task JSON."""
 
     try:
-        with httpx.Client(timeout=30.0) as client:
-            resp = client.post(
-                GROQ_API_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": GROQ_MODEL,
-                    "temperature": 0.2,
-                    "max_tokens": 512,
-                    "messages": [
-                        {"role": "system", "content": TASK_TRANSFORM_SYSTEM},
-                        {"role": "user", "content": user_content},
-                    ],
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        if gemini_api_key:
+            logger.info("ticket_ai_provider provider=gemini model=%s structured_output=true", GEMINI_MODEL)
+            content = _call_gemini_structured(TASK_TRANSFORM_SYSTEM, user_content, gemini_api_key)
+        else:
+            logger.info("ticket_ai_provider provider=groq model=%s structured_output=prompt_enforced", GROQ_MODEL)
+            content = _call_groq(TASK_TRANSFORM_SYSTEM, user_content, groq_api_key or "")
     except Exception as error:
         logger.exception("ticket_ai_classification_http_error error=%s", error)
         return None

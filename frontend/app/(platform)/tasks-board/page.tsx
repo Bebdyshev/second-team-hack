@@ -13,11 +13,32 @@ import {
   FiArrowRight,
   FiChevronDown,
   FiFilter,
+  FiMove,
   FiPlus,
   FiTrash2,
 } from 'react-icons/fi'
 
 import { AppShell } from '@/components/app-shell'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/context/auth-context'
 import { apiRequest, ApiError } from '@/lib/api'
 
@@ -109,13 +130,18 @@ type DraggableTaskCardProps = {
 const DraggableTaskCard = ({ task, onMove, onDelete }: DraggableTaskCardProps) => {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id })
   return (
-    <div
-      ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      className={`cursor-grab active:cursor-grabbing ${isDragging ? 'opacity-40' : ''}`}
-    >
-      <TaskCard task={task} onMove={onMove} onDelete={onDelete} />
+    <div ref={setNodeRef} className={`flex gap-1.5 ${isDragging ? 'opacity-40' : ''}`}>
+      <div
+        {...listeners}
+        {...attributes}
+        className='flex shrink-0 cursor-grab touch-none items-center justify-center self-center rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing'
+        aria-label='Drag to move'
+      >
+        <FiMove className='size-3.5' />
+      </div>
+      <div className='min-w-0 flex-1'>
+        <TaskCard task={task} onMove={onMove} onDelete={onDelete} />
+      </div>
     </div>
   )
 }
@@ -299,25 +325,54 @@ const TasksBoardPage = () => {
           <FiChevronDown className='pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-slate-400' />
         </div>
 
-        <button
-          type='button'
-          onClick={() => setShowNewTaskForm((prev) => !prev)}
-          className='ml-auto inline-flex h-7 items-center gap-1 rounded-md bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50'
-          aria-label='Add new task'
-        >
-          <FiPlus className='size-3.5' />
-          Task
-        </button>
+        <Dialog open={showNewTaskForm} onOpenChange={setShowNewTaskForm}>
+          <DialogTrigger asChild>
+            <button
+              type='button'
+              className='ml-auto inline-flex h-7 items-center gap-1 rounded-md bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50'
+              aria-label='Add new task'
+            >
+              <FiPlus className='size-3.5' />
+              Task
+            </button>
+          </DialogTrigger>
+          <DialogContent className='sm:max-w-[425px]'>
+            <DialogHeader>
+              <DialogTitle>New Task</DialogTitle>
+              <DialogDescription>Create a daily task for the building.</DialogDescription>
+            </DialogHeader>
+            <NewTaskForm
+              buildings={buildings}
+              onAdd={handleAddTask}
+              onCancel={() => setShowNewTaskForm(false)}
+              variant='dialog'
+            />
+            <DialogFooter className='mt-4 gap-2 sm:gap-0'>
+              <DialogClose asChild>
+                <button
+                  type='button'
+                  className='h-9 rounded-md border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50'
+                  onClick={() => setShowNewTaskForm(false)}
+                >
+                  Cancel
+                </button>
+              </DialogClose>
+              <button
+                type='submit'
+                form='new-task-form'
+                className='h-9 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800'
+              >
+                Add Task
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {error && (
         <div className='mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700'>
           {error}
         </div>
-      )}
-
-      {showNewTaskForm && (
-        <NewTaskForm buildings={buildings} onAdd={handleAddTask} onCancel={() => setShowNewTaskForm(false)} />
       )}
 
       {isLoading ? (
@@ -427,7 +482,7 @@ const TaskCard = ({ task, onMove, onDelete }: TaskCardProps) => {
           <span className='rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600'>{task.apartment}</span>
         )}
       </div>
-      <div className='mt-2.5 flex items-center gap-1 pt-2'>
+      <div className='mt-2.5 flex items-center gap-1 pt-2' onPointerDown={(e) => e.stopPropagation()}>
         {prevStatus && (
           <button
             type='button'
@@ -466,10 +521,11 @@ const TaskCard = ({ task, onMove, onDelete }: TaskCardProps) => {
 type NewTaskFormProps = {
   buildings: string[]
   onAdd: (task: Omit<Task, 'id' | 'createdAt'>) => void
-  onCancel: () => void
+  onCancel?: () => void
+  variant?: 'inline' | 'dialog'
 }
 
-const NewTaskForm = ({ buildings, onAdd, onCancel }: NewTaskFormProps) => {
+const NewTaskForm = ({ buildings, onAdd, onCancel, variant = 'inline' }: NewTaskFormProps) => {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [building, setBuilding] = useState(buildings[0] || '')
@@ -491,98 +547,103 @@ const NewTaskForm = ({ buildings, onAdd, onCancel }: NewTaskFormProps) => {
     })
   }
 
+  const isDialog = variant === 'dialog'
+
   return (
-    <form onSubmit={handleSubmit} className='mb-3 rounded-lg bg-white p-3'>
-      <h3 className='mb-2 text-xs font-semibold text-slate-800'>New Task</h3>
+    <form
+      id={isDialog ? 'new-task-form' : undefined}
+      onSubmit={handleSubmit}
+      className={isDialog ? 'grid gap-4' : 'mb-3 rounded-lg bg-white p-3'}
+    >
+      {!isDialog && <h3 className='mb-2 text-xs font-semibold text-slate-800'>New Task</h3>}
       <div className='grid gap-2 sm:grid-cols-2'>
-        <div className='sm:col-span-2'>
-          <label htmlFor='task-title' className='mb-1 block text-xs text-slate-600'>Title</label>
-          <input
+        <div className='space-y-2 sm:col-span-2'>
+          <Label htmlFor='task-title'>Title</Label>
+          <Input
             id='task-title'
             type='text'
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder='Task title...'
-            className='h-8 w-full rounded-md bg-white px-2.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300'
             required
           />
         </div>
-        <div className='sm:col-span-2'>
-          <label htmlFor='task-desc' className='mb-1 block text-xs text-slate-600'>Description</label>
-          <textarea
+        <div className='space-y-2 sm:col-span-2'>
+          <Label htmlFor='task-desc'>Description</Label>
+          <Textarea
             id='task-desc'
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder='Details...'
             rows={2}
-            className='w-full resize-none rounded-md bg-white px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300'
           />
         </div>
-        <div>
-          <label htmlFor='task-building' className='mb-1 block text-xs text-slate-600'>Building</label>
-          <select
-            id='task-building'
-            value={building}
-            onChange={(e) => setBuilding(e.target.value)}
-            className='h-8 w-full rounded-md bg-white px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-300'
-          >
-            {buildings.map((b) => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-          </select>
+        <div className='space-y-2'>
+          <Label>Building</Label>
+          <Select value={building} onValueChange={setBuilding}>
+            <SelectTrigger id='task-building'>
+              <SelectValue placeholder='Select building' />
+            </SelectTrigger>
+            <SelectContent>
+              {buildings.map((b) => (
+                <SelectItem key={b} value={b}>{b}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-        <div>
-          <label htmlFor='task-category' className='mb-1 block text-xs text-slate-600'>Category</label>
-          <select
-            id='task-category'
-            value={category}
-            onChange={(e) => setCategory(e.target.value as Category)}
-            className='h-8 w-full rounded-md bg-white px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-300'
-          >
-            {(Object.keys(CATEGORY_CONFIG) as Category[]).map((key) => (
-              <option key={key} value={key}>{CATEGORY_CONFIG[key].label}</option>
-            ))}
-          </select>
+        <div className='space-y-2'>
+          <Label>Category</Label>
+          <Select value={category} onValueChange={(v) => setCategory(v as Category)}>
+            <SelectTrigger id='task-category'>
+              <SelectValue placeholder='Select category' />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(CATEGORY_CONFIG) as Category[]).map((key) => (
+                <SelectItem key={key} value={key}>{CATEGORY_CONFIG[key].label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-        <div>
-          <label htmlFor='task-priority' className='mb-1 block text-xs text-slate-600'>Priority</label>
-          <select
-            id='task-priority'
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as Priority)}
-            className='h-8 w-full rounded-md bg-white px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-300'
-          >
-            {(Object.keys(PRIORITY_CONFIG) as Priority[]).map((key) => (
-              <option key={key} value={key}>{PRIORITY_CONFIG[key].label}</option>
-            ))}
-          </select>
+        <div className='space-y-2'>
+          <Label>Priority</Label>
+          <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
+            <SelectTrigger id='task-priority'>
+              <SelectValue placeholder='Select priority' />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(PRIORITY_CONFIG) as Priority[]).map((key) => (
+                <SelectItem key={key} value={key}>{PRIORITY_CONFIG[key].label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-        <div>
-          <label htmlFor='task-time' className='mb-1 block text-xs text-slate-600'>Due Time</label>
-          <input
+        <div className='space-y-2'>
+          <Label htmlFor='task-time'>Due Time</Label>
+          <Input
             id='task-time'
             type='time'
             value={dueTime}
             onChange={(e) => setDueTime(e.target.value)}
-            className='h-8 w-full rounded-md bg-white px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-300'
           />
         </div>
       </div>
-      <div className='mt-3 flex items-center justify-end gap-2'>
-        <button
-          type='button'
-          onClick={onCancel}
-          className='h-7 rounded-md px-2.5 text-xs text-slate-600 hover:bg-slate-50'
-        >
-          Cancel
-        </button>
-        <button
-          type='submit'
-          className='h-7 rounded-md bg-slate-900 px-3 text-xs font-medium text-white hover:bg-slate-800'
-        >
-          Add Task
-        </button>
-      </div>
+      {!isDialog && (
+        <div className='mt-3 flex items-center justify-end gap-2'>
+          <button
+            type='button'
+            onClick={onCancel}
+            className='h-7 rounded-md px-2.5 text-xs text-slate-600 hover:bg-slate-50'
+          >
+            Cancel
+          </button>
+          <button
+            type='submit'
+            className='h-7 rounded-md bg-slate-900 px-3 text-xs font-medium text-white hover:bg-slate-800'
+          >
+            Add Task
+          </button>
+        </div>
+      )}
     </form>
   )
 }

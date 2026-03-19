@@ -308,6 +308,8 @@ def _seed_tasks() -> None:
             status=st,
             due_time=due,
             apartment=apt,
+            ai_comment=None,
+            source_ticket_id=None,
             created_at=today,
         ))
 
@@ -325,7 +327,18 @@ def get_task(task_id: str) -> Task | None:
     return None
 
 
-def create_task(title: str, description: str, building: str, category: str, priority: str, due_time: str, house_id: str, apartment: str | None = None) -> Task:
+def create_task(
+    title: str,
+    description: str,
+    building: str,
+    category: str,
+    priority: str,
+    due_time: str,
+    house_id: str,
+    apartment: str | None = None,
+    ai_comment: str | None = None,
+    source_ticket_id: str | None = None,
+) -> Task:
     _seed_tasks()
     hid = house_id or _resolve_house_id(building)
     if building == "All buildings":
@@ -341,6 +354,8 @@ def create_task(title: str, description: str, building: str, category: str, prio
         status="todo",
         due_time=due_time,
         apartment=apartment,
+        ai_comment=ai_comment,
+        source_ticket_id=source_ticket_id,
         created_at=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
     )
     _tasks.append(task)

@@ -185,6 +185,8 @@ class Task(BaseModel):
     status: TaskStatus
     due_time: str
     apartment: str | None = None
+    ai_comment: str | None = None
+    source_ticket_id: str | None = None
     created_at: str
 
 

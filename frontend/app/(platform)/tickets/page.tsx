@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { FiCheck, FiEye, FiMessageCircle, FiPaperclip, FiPlus, FiSend } from 'react-icons/fi'
 
 import { AppShell } from '@/components/app-shell'
@@ -44,12 +45,17 @@ const statusColor: Record<string, string> = {
 }
 
 const TicketsPage = () => {
+  const router = useRouter()
   const { accessToken, activeRole, user } = useAuth()
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
+
+  useEffect(() => {
+    if (activeRole === 'Manager') router.replace('/tasks-board')
+  }, [activeRole, router])
 
   const loadTickets = useCallback(async () => {
     if (!accessToken) return

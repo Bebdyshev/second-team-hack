@@ -35,6 +35,8 @@ type Task = {
   status: Status
   dueTime: string
   apartment?: string
+  aiComment?: string | null
+  sourceTicketId?: string | null
   createdAt: string
 }
 
@@ -55,8 +57,8 @@ const CATEGORY_CONFIG: Record<Category, { label: string }> = {
 
 const COLUMN_CONFIG: Record<Status, { title: string }> = {
   todo: { title: 'To Do' },
-  in_progress: { title: 'In Progress' },
-  done: { title: 'Done' },
+  in_progress: { title: 'In Progress' }, // Manager clicks "Review" → moves here
+  done: { title: 'Done' }, // Manager clicks "Decision" → moves here
 }
 
 const COLUMNS: Status[] = ['todo', 'in_progress', 'done']
@@ -73,12 +75,16 @@ type ApiTask = {
   status: Status
   due_time: string
   apartment?: string
+  ai_comment?: string | null
+  source_ticket_id?: string | null
   created_at: string
 }
 
 const mapApiTask = (t: ApiTask): Task => ({
   ...t,
   dueTime: t.due_time,
+  aiComment: t.ai_comment,
+  sourceTicketId: t.source_ticket_id,
   createdAt: t.created_at,
 })
 
@@ -135,6 +141,11 @@ const TaskCardContent = ({ task, isOverlay }: TaskCardContentProps) => {
       </div>
       <h3 className='text-xs font-semibold text-slate-800'>{task.title}</h3>
       <p className='mt-1 line-clamp-2 text-[11px] leading-4 text-slate-500'>{task.description}</p>
+      {task.aiComment && (
+        <p className='mt-1 rounded bg-amber-50 px-1.5 py-1 text-[10px] leading-3.5 text-amber-800'>
+          AI: {task.aiComment}
+        </p>
+      )}
       <div className='mt-2 flex items-center gap-1.5'>
         <span className='rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600'>{task.building}</span>
         {task.apartment && (
@@ -381,6 +392,13 @@ const TaskCard = ({ task, onMove, onDelete }: TaskCardProps) => {
   const prevStatus: Status | null =
     task.status === 'done' ? 'in_progress' : task.status === 'in_progress' ? 'todo' : null
 
+  const nextLabel =
+    nextStatus && task.sourceTicketId
+      ? (nextStatus === 'in_progress' ? 'Review' : nextStatus === 'done' ? 'Decision' : COLUMN_CONFIG[nextStatus].title)
+      : nextStatus
+        ? COLUMN_CONFIG[nextStatus].title
+        : ''
+
   return (
     <article className='group rounded-md bg-white p-2.5'>
       <div className='mb-1.5 flex items-start justify-between gap-2'>
@@ -398,14 +416,17 @@ const TaskCard = ({ task, onMove, onDelete }: TaskCardProps) => {
 
       <h3 className='text-xs font-semibold text-slate-800'>{task.title}</h3>
       <p className='mt-1 line-clamp-2 text-[11px] leading-4 text-slate-500'>{task.description}</p>
-
+      {task.aiComment && (
+        <p className='mt-1 rounded bg-amber-50 px-1.5 py-1 text-[10px] leading-3.5 text-amber-800'>
+          AI: {task.aiComment}
+        </p>
+      )}
       <div className='mt-2 flex items-center gap-1.5'>
         <span className='rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600'>{task.building}</span>
         {task.apartment && (
           <span className='rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600'>{task.apartment}</span>
         )}
       </div>
-
       <div className='mt-2.5 flex items-center gap-1 pt-2'>
         {prevStatus && (
           <button
@@ -425,7 +446,7 @@ const TaskCard = ({ task, onMove, onDelete }: TaskCardProps) => {
             className='flex h-5 items-center gap-1 rounded bg-blue-50 px-1.5 text-[10px] text-blue-700 hover:bg-blue-100'
             aria-label={`Move to ${COLUMN_CONFIG[nextStatus].title}`}
           >
-            {COLUMN_CONFIG[nextStatus].title}
+            {nextLabel}
             <FiArrowRight className='size-2.5' />
           </button>
         )}

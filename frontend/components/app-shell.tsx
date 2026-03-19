@@ -23,17 +23,19 @@ type NavItem = {
   label: string
   icon: React.ComponentType<{ className?: string }>
   managerOnly?: boolean
+  residentOnly?: boolean
+  labelManager?: string
 }
 
 const mainLinks: NavItem[] = [
   { href: '/dashboard', label: 'Overview', icon: FiGrid },
-  { href: '/workspace-shell', label: 'My Apartment', icon: FiHome },
+  { href: '/workspace-shell', label: 'My Apartment', labelManager: 'Buildings', icon: FiHome },
   { href: '/tasks-board', label: 'Daily Tasks', icon: FiBarChart2 },
   { href: '/data-tables', label: 'Meters', icon: FiDatabase },
   { href: '/knowledge-base', label: 'Alerts', icon: FiAlertTriangle },
   { href: '/agents', label: 'Maintenance', icon: FiTool },
   { href: '/legal-assistant', label: 'Reports', icon: FiFileText },
-  { href: '/tickets', label: 'Tickets', icon: FiMessageCircle },
+  { href: '/tickets', label: 'Tickets', icon: FiMessageCircle, residentOnly: true },
   { href: '/api-status', label: 'Integrations', icon: FiWifi, managerOnly: true },
 ]
 
@@ -76,10 +78,15 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
           <p className='mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-400'>Navigation</p>
           <nav className='space-y-0.5'>
             {mainLinks
-              .filter((item) => !item.managerOnly || activeRole === 'Manager')
+              .filter((item) => {
+                if (item.managerOnly && activeRole !== 'Manager') return false
+                if (item.residentOnly && activeRole !== 'Resident') return false
+                return true
+              })
               .map((item) => {
               const Icon = item.icon
               const isActive = pathname === item.href
+              const displayLabel = activeRole === 'Manager' && item.labelManager ? item.labelManager : item.label
               return (
                 <Link
                   key={item.href}
@@ -91,7 +98,7 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
                   }`}
                 >
                   <Icon className='size-4 shrink-0' />
-                  {item.label}
+                  {displayLabel}
                 </Link>
               )
             })}

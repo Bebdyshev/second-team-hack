@@ -6,7 +6,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 
-from src.housing import store, web3
+from src.housing import groq_client, store, web3
 from src.housing.schemas import (
     AnchorRequest,
     Apartment,
@@ -388,7 +388,11 @@ def create_ticket(payload: TicketCreate, user: dict[str, str] = Depends(get_curr
     apt_id = user.get("apartment_id") or ""
     if not apt_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="resident has no apartment")
-    return store.create_ticket(
+
+    house = store.get_house(user["house_id"])
+    building_name = house.name if house else "Maple Residence"
+
+    ticket = store.create_ticket(
         house_id=user["house_id"],
         resident_id=user["id"],
         resident_name=user["full_name"],
@@ -400,6 +404,45 @@ def create_ticket(payload: TicketCreate, user: dict[str, str] = Depends(get_curr
         incident_time=payload.incident_time,
         attachments=payload.attachments,
     )
+
+    # Transform ticket to task via Groq Qwen3-32B and add to Daily Tasks
+    task_data = groq_client.transform_ticket_to_task(
+        subject=payload.subject,
+        description=payload.description,
+        incident_date=payload.incident_date,
+        incident_time=payload.incident_time,
+        apartment_id=apt_id,
+        building_name=building_name,
+    )
+    if task_data:
+        store.create_task(
+            title=task_data["title"],
+            description=task_data["description"],
+            building=task_data["building"],
+            category=task_data["category"],
+            priority=task_data["priority"],
+            due_time=task_data["due_time"],
+            house_id=user["house_id"],
+            apartment=task_data.get("apartment"),
+            ai_comment=task_data.get("ai_comment"),
+            source_ticket_id=ticket.id,
+        )
+    else:
+        # Fallback if Groq unavailable: create basic task from ticket
+        store.create_task(
+            title=payload.subject,
+            description=payload.description,
+            building=building_name,
+            category="complaint",
+            priority="medium",
+            due_time=payload.incident_time or "12:00",
+            house_id=user["house_id"],
+            apartment=apt_id,
+            ai_comment=None,
+            source_ticket_id=ticket.id,
+        )
+
+    return ticket
 
 
 @router.get("/tickets", response_model=list[Ticket])

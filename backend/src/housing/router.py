@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from pathlib import Path
 import logging
+import random
 from uuid import uuid4
 
 import json as _json
@@ -46,6 +48,8 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 _analytics_reasoning_cache: dict[str, dict[str, object]] = {}
 _analytics_cache_file = Path(__file__).resolve().parents[2] / ".analytics_reasoning_cache.json"
+_meters_stream_state: dict[str, dict[str, object]] = {}
+_meters_stream_state_file = Path(__file__).resolve().parents[2] / ".meters_raw_state.json"
 
 
 def _load_analytics_cache() -> dict[str, dict[str, object]]:
@@ -72,6 +76,32 @@ def _save_analytics_cache() -> None:
 
 
 _analytics_reasoning_cache = _load_analytics_cache()
+
+
+def _load_meters_stream_state() -> dict[str, dict[str, object]]:
+    try:
+        if not _meters_stream_state_file.exists():
+            return {}
+        raw = _meters_stream_state_file.read_text(encoding="utf-8")
+        parsed = _json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception as exc:
+        logger.warning("meters_stream_state_load_failed error=%s", exc)
+    return {}
+
+
+def _save_meters_stream_state() -> None:
+    try:
+        _meters_stream_state_file.write_text(
+            _json.dumps(_meters_stream_state, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.warning("meters_stream_state_save_failed error=%s", exc)
+
+
+_meters_stream_state = _load_meters_stream_state()
 
 
 def _assert_house_access(user: dict[str, str], house_id: str) -> None:
@@ -312,6 +342,127 @@ def meters(house_id: str | None = Query(default=None), user: dict[str, str] = De
     target_house = house_id or user["house_id"]
     _assert_house_access(user, target_house)
     return store.list_meters(target_house)
+
+
+@router.get("/meters/raw-stream")
+async def meters_raw_stream(
+    house_id: str | None = Query(default=None),
+    user: dict[str, str] = Depends(get_current_user),
+) -> StreamingResponse:
+    target_house = house_id or user["house_id"]
+    _assert_house_access(user, target_house)
+    meters_list = store.list_meters(target_house)
+    if not meters_list:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no meters found")
+
+    state = _meters_stream_state.get(target_house)
+    if not state:
+        state = {
+            "last_values": {},
+            "history": [],
+            "seed": abs(hash(target_house)) % (2**31),
+        }
+        _meters_stream_state[target_house] = state
+
+    last_values = state.get("last_values")
+    history = state.get("history")
+    if not isinstance(last_values, dict):
+        last_values = {}
+        state["last_values"] = last_values
+    if not isinstance(history, list):
+        history = []
+        state["history"] = history
+
+    rng = random.Random(int(state.get("seed", 0)) + int(datetime.utcnow().timestamp()) // 30)
+
+    def _base_for_resource(resource: str) -> float:
+        if resource == "electricity":
+            return rng.uniform(1.6, 3.8)
+        if resource == "water":
+            return rng.uniform(14.0, 40.0)
+        if resource == "gas":
+            return rng.uniform(6.0, 22.0)
+        if resource == "heating":
+            return rng.uniform(0.8, 2.2)
+        return rng.uniform(1.0, 3.0)
+
+    for meter in meters_list:
+        if meter.id not in last_values:
+            last_values[meter.id] = round(_base_for_resource(meter.resource), 3)
+
+    async def generate():
+        if history:
+            # Keep continuity after page reload
+            yield f"event: snapshot\ndata: {_json.dumps(history[-25:])}\n\n"
+
+        while True:
+            meter = rng.choice(meters_list)
+            roll = rng.random()
+            quality = "ok"
+            is_stale = False
+            is_dropped = False
+            lag_ms = int(rng.uniform(120, 850))
+            signal = meter.signal_strength
+            previous_value = float(last_values.get(meter.id, _base_for_resource(meter.resource)))
+
+            if roll < 0.12:
+                quality = "drop"
+                is_dropped = True
+                signal = "offline" if rng.random() < 0.7 else "weak"
+                payload = {
+                    "ts": datetime.utcnow().isoformat(),
+                    "meter_id": meter.id,
+                    "house_id": meter.house_id,
+                    "resource": meter.resource,
+                    "signal_strength": signal,
+                    "quality": quality,
+                    "is_stale": is_stale,
+                    "is_dropped": is_dropped,
+                    "lag_ms": int(rng.uniform(1200, 6000)),
+                    "value": None,
+                }
+            else:
+                if roll < 0.32:
+                    quality = "stale"
+                    is_stale = True
+                    lag_ms = int(rng.uniform(2000, 12000))
+                    signal = "weak" if rng.random() < 0.65 else meter.signal_strength
+                    value = round(previous_value, 3)
+                else:
+                    delta = rng.uniform(-0.22, 0.22)
+                    value = round(max(0.05, previous_value + delta), 3)
+                    last_values[meter.id] = value
+
+                payload = {
+                    "ts": datetime.utcnow().isoformat(),
+                    "meter_id": meter.id,
+                    "house_id": meter.house_id,
+                    "resource": meter.resource,
+                    "signal_strength": signal,
+                    "quality": quality,
+                    "is_stale": is_stale,
+                    "is_dropped": is_dropped,
+                    "lag_ms": lag_ms,
+                    "value": value,
+                }
+
+            history.append(payload)
+            if len(history) > 300:
+                del history[: len(history) - 300]
+            _save_meters_stream_state()
+
+            yield f"data: {_json.dumps(payload)}\n\n"
+            await asyncio.sleep(0.9)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
 
 
 @router.post("/houses/{house_id}/reports/anchor", response_model=ReportAnchor)

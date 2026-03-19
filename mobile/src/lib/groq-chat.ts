@@ -1,5 +1,3 @@
-import Constants from 'expo-constants'
-
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant'
   content: string
@@ -12,9 +10,7 @@ const MODELS = [
 ] as const
 
 function getGroqKey(): string {
-  return (
-    (Constants.expoConfig?.extra as Record<string, string> | undefined)?.groqApiKey ?? ''
-  )
+  return process.env.EXPO_PUBLIC_GROQ_API_KEY ?? ''
 }
 
 /**

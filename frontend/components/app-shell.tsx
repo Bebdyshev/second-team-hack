@@ -37,13 +37,17 @@ type AppShellProps = {
   title: string
   subtitle?: string
   children: React.ReactNode
+  rightPanel?: React.ReactNode
+  rightPanelOpen?: boolean
 }
 
-export const AppShell = ({ title, subtitle, children }: AppShellProps) => {
+const PANEL_WIDTH = 360
+
+export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen = true }: AppShellProps) => {
   const pathname = usePathname()
 
   return (
-    <main className='flex min-h-screen items-start bg-[#f0f2f5]'>
+    <main className={`flex ${rightPanel ? 'h-screen overflow-hidden' : 'min-h-screen items-start'} bg-[#f0f2f5]`}>
       <aside className='sticky top-0 flex h-screen w-60 shrink-0 self-start flex-col border-r border-slate-200 bg-white'>
         {/* Logo */}
         <div className='flex items-center gap-3 px-5 py-5'>
@@ -120,8 +124,26 @@ export const AppShell = ({ title, subtitle, children }: AppShellProps) => {
         </header>
 
         {/* Page body */}
-        <div className='min-w-0 flex-1 overflow-auto p-6'>
-          {children}
+        <div className='relative flex min-h-0 flex-1 overflow-hidden'>
+          <div className='min-w-0 flex-1 overflow-auto p-6'>
+            {children}
+          </div>
+          {rightPanel && (
+            <div
+              className='absolute bottom-0 right-0 top-0 z-40 overflow-hidden border-l border-slate-200 bg-white shadow-sm'
+              style={{
+                width: PANEL_WIDTH,
+                transform: rightPanelOpen ? 'translateX(0)' : 'translateX(100%)',
+                transition: 'transform 0.42s cubic-bezier(0.22, 1, 0.36, 1)',
+                willChange: 'transform',
+                pointerEvents: rightPanelOpen ? 'auto' : 'none',
+              }}
+            >
+              <div style={{ width: PANEL_WIDTH }} className='flex h-full flex-col'>
+                {rightPanel}
+              </div>
+            </div>
+          )}
         </div>
       </section>
     </main>

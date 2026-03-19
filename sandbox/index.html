@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EcoHouse AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <div class="noise"></div>
+
+    <section class="screen screen-onboarding active" id="onboardingScreen">
+      <div class="hero-copy">
+        <div class="eyebrow">Smart City Hackathon Demo</div>
+        <h1>EcoHouse AI</h1>
+        <p>
+          Explore a living building, step into any apartment, and watch AI-driven resource intelligence turn raw utility data into action.
+        </p>
+        <div class="onboarding-panel glass-panel">
+          <div class="field-group">
+            <label for="floorSelect">Floor</label>
+            <select id="floorSelect"></select>
+          </div>
+          <div class="field-group">
+            <label for="apartmentSelect">Apartment</label>
+            <select id="apartmentSelect"></select>
+          </div>
+          <button class="primary-button" id="enterBuildingBtn">Enter EcoHouse</button>
+        </div>
+      </div>
+
+      <div class="building-hero" id="heroBuilding">
+        <div class="hero-tower">
+          <div class="hero-roof"></div>
+          <div class="hero-grid" id="heroGrid"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="screen screen-building" id="buildingScreen">
+      <header class="topbar glass-panel">
+        <div>
+          <div class="eyebrow">Interactive Building View</div>
+          <h2>EcoHouse AI Control Center</h2>
+        </div>
+        <div class="topbar-actions">
+          <button class="ghost-button" id="backToOnboardingBtn">Reset Tour</button>
+          <button class="toggle-button" id="ecoModeBtn">
+            <span class="toggle-indicator"></span>
+            Eco Mode
+          </button>
+        </div>
+      </header>
+
+      <div class="building-layout">
+        <aside class="left-column">
+          <div class="glass-panel building-summary">
+            <div class="section-title">Building Pulse</div>
+            <div class="metric-grid">
+              <div class="metric-card">
+                <span>Total Power</span>
+                <strong id="buildingPower">0 kWh</strong>
+              </div>
+              <div class="metric-card">
+                <span>Total Water</span>
+                <strong id="buildingWater">0 L</strong>
+              </div>
+              <div class="metric-card">
+                <span>Average Air</span>
+                <strong id="buildingAir">0 AQI</strong>
+              </div>
+              <div class="metric-card">
+                <span>City Load</span>
+                <strong id="cityImpact">0%</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="glass-panel chart-panel compact-chart">
+            <div class="panel-heading">
+              <div>
+                <div class="section-title">Peak Usage Hours</div>
+                <p>Live building demand across the day</p>
+              </div>
+            </div>
+            <canvas id="peakChart"></canvas>
+          </div>
+        </aside>
+
+        <main class="center-column glass-panel">
+          <div class="panel-heading">
+            <div>
+              <div class="section-title">Residential Matrix</div>
+              <p>Hover for preview, click to enter an apartment</p>
+            </div>
+            <div class="mini-badges">
+              <span class="badge green">Efficient</span>
+              <span class="badge yellow">Watch</span>
+              <span class="badge red">Alert</span>
+            </div>
+          </div>
+          <div class="building-grid" id="buildingGrid"></div>
+        </main>
+
+        <aside class="right-column">
+          <div class="glass-panel leaderboard-panel">
+            <div class="panel-heading">
+              <div>
+                <div class="section-title">Eco Ranking</div>
+                <p>Live leaderboard across the building</p>
+              </div>
+            </div>
+            <div class="leaderboard-list" id="leaderboardList"></div>
+          </div>
+
+          <div class="glass-panel notifications-panel">
+            <div class="panel-heading">
+              <div>
+                <div class="section-title">Notifications</div>
+                <p>Alerts, savings tips, and events</p>
+              </div>
+            </div>
+            <div class="notification-list" id="notificationList"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="screen screen-apartment" id="apartmentScreen">
+      <header class="apartment-header">
+        <button class="ghost-button" id="backToBuildingBtn">Back to Building</button>
+        <div>
+          <div class="eyebrow">Apartment Intelligence</div>
+          <h2 id="apartmentTitle">Apartment 0</h2>
+        </div>
+        <div class="score-pill glass-panel">
+          <span>Eco Score</span>
+          <strong id="ecoScoreValue">0</strong>
+        </div>
+      </header>
+
+      <div class="dashboard-grid">
+        <section class="glass-panel hero-stats">
+          <div class="hero-stat">
+            <span>Live Electricity</span>
+            <strong id="liveElectricity">0.0 kWh</strong>
+          </div>
+          <div class="hero-stat">
+            <span>Live Water</span>
+            <strong id="liveWater">0 L</strong>
+          </div>
+          <div class="hero-stat">
+            <span>CO2 / Humidity</span>
+            <strong id="liveAir">0 ppm / 0%</strong>
+          </div>
+          <div class="hero-stat">
+            <span>Monthly Savings</span>
+            <strong id="savingsValue">0%</strong>
+          </div>
+        </section>
+
+        <section class="glass-panel chart-panel">
+          <div class="panel-heading">
+            <div>
+              <div class="section-title">Electricity Usage</div>
+              <p>Daily vs monthly consumption patterns</p>
+            </div>
+          </div>
+          <canvas id="electricityChart"></canvas>
+        </section>
+
+        <section class="glass-panel chart-panel">
+          <div class="panel-heading">
+            <div>
+              <div class="section-title">Water Usage</div>
+              <p>Daily behavior with anomaly-aware tracking</p>
+            </div>
+          </div>
+          <canvas id="waterChart"></canvas>
+        </section>
+
+        <section class="glass-panel chart-panel">
+          <div class="panel-heading">
+            <div>
+              <div class="section-title">Air Quality</div>
+              <p>Indoor comfort signals in real time</p>
+            </div>
+          </div>
+          <canvas id="airChart"></canvas>
+        </section>
+
+        <section class="glass-panel insights-panel">
+          <div class="panel-heading">
+            <div>
+              <div class="section-title">AI Insights</div>
+              <p>Simulated recommendations and anomaly detection</p>
+            </div>
+          </div>
+          <div class="insight-list" id="insightList"></div>
+        </section>
+      </div>
+    </section>
+
+    <div class="preview-card glass-panel" id="previewCard"></div>
+
+    <button class="assistant-fab" id="assistantFab">AI</button>
+    <div class="assistant-panel glass-panel" id="assistantPanel">
+      <div class="panel-heading">
+        <div>
+          <div class="section-title">EcoHouse Assistant</div>
+          <p>Concise building guidance in demo mode</p>
+        </div>
+        <button class="ghost-button small" id="closeAssistantBtn">Close</button>
+      </div>
+      <div class="assistant-messages" id="assistantMessages"></div>
+      <div class="assistant-actions">
+        <button class="ghost-button small assistant-prompt" data-prompt="How can this building reduce evening peaks?">Peak strategy</button>
+        <button class="ghost-button small assistant-prompt" data-prompt="Summarize the selected apartment.">Apartment summary</button>
+        <button class="ghost-button small assistant-prompt" data-prompt="What would impress hackathon judges most here?">Judge pitch</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

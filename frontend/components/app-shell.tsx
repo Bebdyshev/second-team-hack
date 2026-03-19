@@ -125,7 +125,13 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
 
         {/* Page body */}
         <div className='relative flex min-h-0 flex-1 overflow-hidden'>
-          <div className='min-w-0 flex-1 overflow-auto p-6'>
+          <div
+            className='min-w-0 flex-1 overflow-auto p-6'
+            style={{
+              marginRight: rightPanel && rightPanelOpen ? PANEL_WIDTH : 0,
+              transition: 'margin-right 0.42s cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+          >
             {children}
           </div>
           {rightPanel && (

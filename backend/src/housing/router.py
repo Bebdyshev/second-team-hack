@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 import logging
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import Response
+import json as _json
 
-from src.housing import gemini_client, store, web3
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response, StreamingResponse
+
+from src.housing import gemini_client, groq_client, store, web3
 from src.housing.geo_services import find_nearby, geocode_address
 from src.housing.schemas import (
     AnchorRequest,
@@ -41,6 +44,34 @@ from src.housing.security import get_current_user, issue_tokens_for_user, requir
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_analytics_reasoning_cache: dict[str, dict[str, object]] = {}
+_analytics_cache_file = Path(__file__).resolve().parents[2] / ".analytics_reasoning_cache.json"
+
+
+def _load_analytics_cache() -> dict[str, dict[str, object]]:
+    try:
+        if not _analytics_cache_file.exists():
+            return {}
+        raw = _analytics_cache_file.read_text(encoding="utf-8")
+        parsed = _json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception as exc:
+        logger.warning("analytics_cache_load_failed error=%s", exc)
+    return {}
+
+
+def _save_analytics_cache() -> None:
+    try:
+        _analytics_cache_file.write_text(
+            _json.dumps(_analytics_reasoning_cache, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.warning("analytics_cache_save_failed error=%s", exc)
+
+
+_analytics_reasoning_cache = _load_analytics_cache()
 
 
 def _assert_house_access(user: dict[str, str], house_id: str) -> None:
@@ -601,6 +632,154 @@ def get_ticket(
     if user["role"] == "Resident" and user["id"] != ticket.resident_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
     return ticket
+
+
+@router.get("/houses/{house_id}/analytics/reasoning")
+def house_analytics_reasoning(
+    house_id: str,
+    user: dict[str, str] = Depends(require_manager),
+) -> dict:
+    _assert_house_access(user, house_id)
+
+    house = store.get_house(house_id)
+    if house is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="house not found")
+
+    apartments = store.list_apartments(house_id)
+    if not apartments:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no apartments found")
+
+    # Aggregate hourly data across all apartments
+    electricity_24h: list[float] = []
+    water_24h: list[float] = []
+    co2_24h: list[float] = []
+
+    for h in range(24):
+        electricity_24h.append(round(sum(apt.electricity_daily[h] for apt in apartments), 2))
+        water_24h.append(round(sum(apt.water_daily[h] for apt in apartments), 2))
+        raw_co2 = [apt.co2_series[h] for apt in apartments if apt.co2_series]
+        co2_24h.append(round(sum(raw_co2) / len(raw_co2), 1) if raw_co2 else 0.0)
+
+    result = groq_client.analyze_house_resources(
+        electricity_24h=electricity_24h,
+        water_24h=water_24h,
+        co2_24h=co2_24h,
+        house_name=house.name,
+    )
+
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI service unavailable")
+
+    return {
+        "house_id": house_id,
+        "house_name": house.name,
+        "electricity_24h": electricity_24h,
+        "water_24h": water_24h,
+        "co2_24h": co2_24h,
+        "reasoning": result,
+    }
+
+
+@router.get("/houses/{house_id}/analytics/reasoning/stream")
+def house_analytics_reasoning_stream(
+    house_id: str,
+    apartment_id: str | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    user: dict[str, str] = Depends(require_manager),
+) -> StreamingResponse:
+    _assert_house_access(user, house_id)
+
+    house = store.get_house(house_id)
+    if house is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="house not found")
+
+    apartments = store.list_apartments(house_id)
+    if not apartments:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no apartments found")
+
+    # If apartment_id is provided, filter to that single apartment
+    if apartment_id:
+        apartments = [a for a in apartments if a.id == apartment_id]
+        if not apartments:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="apartment not found")
+        scope_name = f"Apartment {apartment_id}"
+    else:
+        scope_name = house.name
+
+    electricity_24h: list[float] = []
+    water_24h: list[float] = []
+    co2_24h: list[float] = []
+    for h in range(24):
+        electricity_24h.append(round(sum(apt.electricity_daily[h] for apt in apartments), 2))
+        water_24h.append(round(sum(apt.water_daily[h] for apt in apartments), 2))
+        raw_co2 = [apt.co2_series[h] for apt in apartments if apt.co2_series]
+        co2_24h.append(round(sum(raw_co2) / len(raw_co2), 1) if raw_co2 else 0.0)
+
+    api_key = groq_client._load_api_key()
+    if not api_key:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI service unavailable")
+
+    # Also send raw metrics as SSE preamble so frontend can draw charts immediately
+    metrics_event = (
+        "event: metrics\n"
+        f"data: {_json.dumps({'electricity_24h': electricity_24h, 'water_24h': water_24h, 'co2_24h': co2_24h})}\n\n"
+    )
+    scope_key = f"{house_id}:{apartment_id or 'all'}"
+    metrics_signature = _json.dumps(
+        {"electricity_24h": electricity_24h, "water_24h": water_24h, "co2_24h": co2_24h},
+        sort_keys=True,
+    )
+
+    def generate():
+        yield metrics_event
+        cached = _analytics_reasoning_cache.get(scope_key)
+        cached_reasoning = cached.get("reasoning") if cached else None
+        cached_signature = cached.get("metrics_signature") if cached else None
+        if (
+            cached
+            and not force_refresh
+            and cached_signature == metrics_signature
+            and isinstance(cached_reasoning, dict)
+        ):
+            logger.info("resource_stream_cache_hit scope=%s", scope_key)
+            yield f"event: structured\ndata: {_json.dumps(cached_reasoning)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        buf: list[str] = []
+        for token in groq_client.stream_resource_analysis(
+            electricity_24h=electricity_24h,
+            water_24h=water_24h,
+            co2_24h=co2_24h,
+            scope_name=scope_name,
+            api_key=api_key,
+        ):
+            buf.append(token)
+            yield f"data: {_json.dumps({'token': token})}\n\n"
+        # After stream ends, try to parse the full JSON and emit structured event
+        full_text = "".join(buf)
+        cleaned = groq_client._clean_ai_response(full_text)
+        try:
+            parsed = _json.loads(cleaned)
+            _analytics_reasoning_cache[scope_key] = {
+                "reasoning": parsed,
+                "metrics_signature": metrics_signature,
+            }
+            _save_analytics_cache()
+            yield f"event: structured\ndata: {_json.dumps(parsed)}\n\n"
+        except Exception:
+            pass
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
 
 
 @router.get("/tickets/{ticket_id}/nearby-services", response_model=NearbyServicesResponse)

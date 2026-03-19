@@ -6,7 +6,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
 
 import httpx
 from dotenv import dotenv_values
@@ -87,6 +87,16 @@ def _extract_gemini_text(data: dict[str, Any]) -> str:
     )[0].get("text", "")
 
 
+def _load_api_key() -> str | None:
+    """Return the best available AI API key (Groq preferred)."""
+    return (
+        os.getenv("GROQ_API_KEY")
+        or ENV_VALUES.get("GROQ_API_KEY")
+        or os.getenv("GEMINI_API_KEY")
+        or ENV_VALUES.get("GEMINI_API_KEY")
+    )
+
+
 def _call_gemini_structured(system_prompt: str, user_prompt: str, api_key: str) -> str:
     """Try progressively simpler Gemini request variants until one succeeds.
 
@@ -163,8 +173,35 @@ def _call_gemini_structured(system_prompt: str, user_prompt: str, api_key: str) 
     return ""
 
 
-def _call_groq(system_prompt: str, user_prompt: str, api_key: str) -> str:
-    with httpx.Client(timeout=30.0) as client:
+def _clean_ai_response(content: str) -> str:
+    """Strip <think> blocks, markdown fences, and whitespace from AI output."""
+    import re
+    content = content.strip()
+    # Remove <think>...</think> (greedy — handles unclosed tags by cutting everything before last })
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    # If <think> opened but never closed, keep only the part after it
+    if "<think>" in content:
+        content = content.split("<think>", 1)[0].strip()
+        if not content:
+            # think block is at the start — grab JSON after it if any
+            pass
+    # Strip markdown fences
+    if content.startswith("```"):
+        content = content.split("\n", 1)[-1]
+        content = content.rsplit("```", 1)[0]
+    content = content.strip()
+    # Extract first JSON object or array
+    for start_char, end_char in [('{', '}'), ('[', ']')]:
+        start = content.find(start_char)
+        end = content.rfind(end_char)
+        if start != -1 and end != -1 and end > start:
+            content = content[start:end + 1]
+            break
+    return content.strip()
+
+
+def _call_groq(system_prompt: str, user_prompt: str, api_key: str, max_tokens: int = 1024) -> str:
+    with httpx.Client(timeout=60.0) as client:
         resp = client.post(
             GROQ_API_URL,
             headers={
@@ -174,7 +211,9 @@ def _call_groq(system_prompt: str, user_prompt: str, api_key: str) -> str:
             json={
                 "model": GROQ_MODEL,
                 "temperature": 0.2,
-                "max_tokens": 512,
+                "max_tokens": max_tokens,
+                # Disable chain-of-thought for qwen3 models to avoid <think> blocks
+                "reasoning_effort": "none",
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -184,6 +223,137 @@ def _call_groq(system_prompt: str, user_prompt: str, api_key: str) -> str:
         resp.raise_for_status()
         data = resp.json()
         return (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+
+
+RESOURCE_ANALYSIS_SYSTEM = """You are a smart-building energy analyst. Analyze 24h resource consumption data for an apartment building.
+
+Output ONLY valid JSON, no markdown:
+{
+  "summary": "<2-3 sentence overall assessment for today>",
+  "findings": [
+    {
+      "hour": "HH:00",
+      "resource": "electricity|water|co2",
+      "value": <number>,
+      "level": "ok|warn|critical",
+      "reason": "<concise 1-sentence explanation of why this hour is notable>"
+    }
+  ],
+  "recommendations": ["<actionable recommendation 1>", "<actionable recommendation 2>"]
+}
+
+Rules:
+- findings: include ONLY hours where value exceeds normal threshold or is unusually low
+- Thresholds: electricity warn>2.8kWh critical>4.5kWh | water warn>35L critical>55L | co2 warn>800ppm critical>1000ppm
+- reason: be specific about what is likely causing the anomaly (e.g. "Morning shower peak typical but 40% above average")
+- recommendations: 2-3 specific, actionable steps for the building manager
+- summary: mention the most critical finding first
+- If all values are normal, still return 2-3 findings for the most interesting hours
+"""
+
+
+def stream_resource_analysis(
+    electricity_24h: list[float],
+    water_24h: list[float],
+    co2_24h: list[float],
+    scope_name: str,
+    api_key: str,
+) -> Generator[str, None, None]:
+    """Stream analysis tokens from Groq token-by-token via SSE."""
+
+    hours_data = "\n".join(
+        f"  {h:02d}:00  elec={electricity_24h[h]:.2f}kWh  water={water_24h[h]:.1f}L  co2={co2_24h[h]:.0f}ppm"
+        for h in range(24)
+    )
+    user_content = f"""Scope: {scope_name}
+24-hour consumption data (electricity kWh/h, water L/h, CO2 ppm):
+{hours_data}
+
+Analyze and return JSON findings."""
+
+    logger.info("resource_stream_start scope=%s", scope_name)
+    with httpx.Client(timeout=90.0) as client:
+        with client.stream(
+            "POST",
+            GROQ_API_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": GROQ_MODEL,
+                "temperature": 0.2,
+                "max_tokens": 4096,
+                "stream": True,
+                "reasoning_effort": "none",
+                "messages": [
+                    {"role": "system", "content": RESOURCE_ANALYSIS_SYSTEM},
+                    {"role": "user", "content": user_content},
+                ],
+            },
+        ) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:].strip()
+                if data == "[DONE]":
+                    logger.info("resource_stream_done scope=%s", scope_name)
+                    return
+                try:
+                    chunk = json.loads(data)
+                    token = (chunk.get("choices") or [{}])[0].get("delta", {}).get("content", "")
+                    if token:
+                        yield token
+                except (json.JSONDecodeError, KeyError):
+                    continue
+
+
+def analyze_house_resources(
+    electricity_24h: list[float],
+    water_24h: list[float],
+    co2_24h: list[float],
+    house_name: str,
+) -> dict[str, Any] | None:
+    """Call AI model to analyze house resource consumption and return structured findings."""
+    logger.info("resource_analysis_start house=%s", house_name)
+
+    groq_api_key = os.getenv("GROQ_API_KEY") or ENV_VALUES.get("GROQ_API_KEY")
+    gemini_api_key = os.getenv("GEMINI_API_KEY") or ENV_VALUES.get("GEMINI_API_KEY")
+
+    if not groq_api_key and not gemini_api_key:
+        logger.warning("resource_analysis_skip reason=missing_api_keys")
+        return None
+
+    hours_data = "\n".join(
+        f"  {h:02d}:00  elec={electricity_24h[h]:.2f}kWh  water={water_24h[h]:.1f}L  co2={co2_24h[h]:.0f}ppm"
+        for h in range(24)
+    )
+    user_content = f"""Building: {house_name}
+24-hour consumption data (electricity kWh/h, water L/h, CO2 ppm):
+{hours_data}
+
+Analyze and return JSON findings."""
+
+    try:
+        if groq_api_key:
+            logger.info("resource_analysis_provider provider=groq model=%s", GROQ_MODEL)
+            content = _call_groq(RESOURCE_ANALYSIS_SYSTEM, user_content, groq_api_key, max_tokens=4096)
+        else:
+            logger.info("resource_analysis_provider provider=gemini model=%s", GEMINI_MODEL)
+            content = _call_gemini_structured(RESOURCE_ANALYSIS_SYSTEM, user_content, gemini_api_key or "")
+    except Exception as error:
+        logger.exception("resource_analysis_error error=%s", error)
+        return None
+
+    content = _clean_ai_response(content)
+    logger.info("resource_analysis_raw content=%r", content[:400])
+
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        logger.warning("resource_analysis_parse_error raw=%r", content[:400])
+        return None
+
+    logger.info("resource_analysis_done findings_count=%d", len(parsed.get("findings", [])))
+    return parsed
 
 
 def transform_ticket_to_task(
@@ -229,10 +399,7 @@ Convert to task JSON."""
         logger.exception("ticket_ai_classification_http_error error=%s", error)
         return None
 
-    content = content.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[-1].rsplit("```", 1)[0]
-    content = content.strip()
+    content = _clean_ai_response(content)
     logger.info("ticket_ai_raw_response content=%r", content[:400])
 
     try:

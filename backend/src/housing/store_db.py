@@ -77,6 +77,11 @@ def get_task_db(db: Session, task_id: str) -> Task | None:
     return _task_from_row(row) if row else None
 
 
+def get_task_by_source_ticket_id_db(db: Session, source_ticket_id: str) -> Task | None:
+    row = db.query(HousingTaskModel).filter(HousingTaskModel.source_ticket_id == source_ticket_id).first()
+    return _task_from_row(row) if row else None
+
+
 def create_task_db(
     db: Session,
     title: str,
@@ -254,3 +259,12 @@ def update_ticket_status_db(
     db.commit()
     db.refresh(row)
     return _ticket_from_row(row)
+
+
+def delete_ticket_db(db: Session, ticket_id: str) -> bool:
+    row = db.query(HousingTicketModel).filter(HousingTicketModel.id == ticket_id).first()
+    if not row:
+        return False
+    db.delete(row)
+    db.commit()
+    return True

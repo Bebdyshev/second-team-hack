@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { FiCheck, FiEye, FiMessageCircle, FiPaperclip, FiPlus, FiSend } from 'react-icons/fi'
+import { FiCheck, FiEye, FiMessageCircle, FiPaperclip, FiPlus, FiSend, FiTrash2 } from 'react-icons/fi'
 
 import { AppShell } from '@/components/app-shell'
 import { Button } from '@/components/ui/button'
@@ -196,6 +196,10 @@ const TicketsPage = () => {
             if (updated) setSelectedTicket(updated)
             void loadTickets()
           }}
+          onDelete={() => {
+            setSelectedTicket(null)
+            void loadTickets()
+          }}
         />
       )}
     </AppShell>
@@ -327,16 +331,19 @@ function TicketDetailModal({
   isManager,
   onClose,
   onUpdate,
+  onDelete,
 }: {
   ticket: Ticket
   accessToken: string | null
   isManager: boolean
   onClose: () => void
   onUpdate: (updated?: Ticket) => void
+  onDelete: () => void
 }) {
   const [followUpText, setFollowUpText] = useState('')
   const [sendingFollowUp, setSendingFollowUp] = useState(false)
   const [updatingStatus, setUpdatingStatus] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [decision, setDecision] = useState(ticket.decision ?? '')
 
   const handleView = async () => {
@@ -362,6 +369,19 @@ function TicketDetailModal({
       onUpdate(updated)
     } finally {
       setUpdatingStatus(false)
+    }
+  }
+
+  const canDelete = !isManager && (ticket.status === 'sent' || ticket.status === 'viewing')
+
+  const handleDelete = async () => {
+    if (!accessToken || !canDelete) return
+    setDeleting(true)
+    try {
+      await apiRequest(`/tickets/${ticket.id}`, { method: 'DELETE', token: accessToken })
+      onDelete()
+    } catch {
+      setDeleting(false)
     }
   }
 
@@ -457,6 +477,17 @@ function TicketDetailModal({
                 Mark as resolved
               </Button>
             </div>
+          )}
+          {canDelete && (
+            <Button
+              variant='outline'
+              onClick={handleDelete}
+              disabled={deleting}
+              className='gap-2 border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700'
+            >
+              <FiTrash2 className='size-4' />
+              {deleting ? 'Deleting…' : 'Delete ticket'}
+            </Button>
           )}
 
           <div className='border-t border-slate-200 pt-4'>

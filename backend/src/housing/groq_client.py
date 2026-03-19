@@ -26,6 +26,14 @@ Output ONLY valid JSON with these exact keys (no markdown, no extra text):
   "complaint_type": "neighbors" | "water" | "electricity" | "schedule" | "general" | "recommendation"
 }
 
+CRITICAL - complaint_type (check this FIRST before other fields):
+- neighbors: ANY mention of neighbor(s), noise, loud, screaming, shouting, clapping, music, party, smoking, conflict with other residents, apartment above/below/next door. Examples: "neighbor too loud", "noise at night", "someone screaming", "loud music" -> ALWAYS neighbors
+- water: leaks, low pressure, dirty water, water meters, plumbing, pipes
+- electricity: outages, flickering lights, breakers, electric meters
+- schedule: heating schedule, cleaning schedule, planned works timing
+- recommendation: suggestion or improvement idea, not a complaint
+- general: ONLY when none of the above fit (e.g. "overall dissatisfied")
+
 Rules:
 - title: copy subject exactly
 - description: copy resident's description exactly
@@ -33,22 +41,7 @@ Rules:
 - priority: infer urgency (leak/critical→high/critical, minor→low)
 - building: use the building name provided
 - apartment: use apartment_id if provided (e.g. apt-502)
-- ai_comment: brief actionable tip for the manager (e.g. "Check bathroom pipes first. May need plumber.")
-- complaint_type: choose exactly one:
-  - neighbors: noise/conflict/smoking/behavior complaints about neighbors
-  - water: leaks, low pressure, dirty water, water meters, plumbing
-  - electricity: outages, flickering lights, breakers, electric meters
-  - schedule: timing/schedule issues (heating schedule, cleaning, planned works)
-  - recommendation: suggestion/improvement idea, not a complaint
-  - general: all other complaints that don't match above clearly
-
-Examples:
-- "neighbor is noisy at night" -> neighbors
-- "water leaking from bathroom pipe" -> water
-- "power outage in apartment" -> electricity
-- "heating starts not according to schedule" -> schedule
-- "please install extra smart sensors" -> recommendation
-- "overall dissatisfied with service" -> general
+- ai_comment: brief actionable tip for the manager
 """
 
 
@@ -118,6 +111,11 @@ Convert to task JSON."""
     complaint_type = parsed.get("complaint_type", "general")
     if complaint_type not in ("neighbors", "water", "electricity", "schedule", "general", "recommendation"):
         complaint_type = "general"
+
+    # Keyword fallback: if subject/description clearly indicate neighbors, override
+    combined = f"{subject} {description}".lower()
+    if any(k in combined for k in ("neighbor", "neighbour", "noise", "loud", "screaming", "shouting", "clapping", "music", "party", "apartment above", "apartment below")):
+        complaint_type = "neighbors"
 
     return {
         "title": str(parsed.get("title", subject))[:200],

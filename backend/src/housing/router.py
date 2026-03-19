@@ -500,6 +500,29 @@ def list_tickets(
     return store.list_tickets_for_resident(user["id"], db=db)
 
 
+@router.delete("/tickets/{ticket_id}", status_code=204)
+def delete_ticket(
+    ticket_id: str,
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> Response:
+    ticket = store.get_ticket(ticket_id, db=db)
+    if ticket is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ticket not found")
+    if user["role"] != "Resident":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="only residents can delete their own tickets")
+    if user["id"] != ticket.resident_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+    if ticket.status == "decision":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cannot delete resolved ticket")
+
+    linked_task = store.get_task_by_source_ticket_id(ticket_id, db=db)
+    if linked_task:
+        store.delete_task(linked_task.id, db=db)
+    store.delete_ticket(ticket_id, db=db)
+    return Response(status_code=204)
+
+
 @router.get("/tickets/{ticket_id}", response_model=Ticket)
 def get_ticket(
     ticket_id: str,

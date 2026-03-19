@@ -338,6 +338,17 @@ def get_task(task_id: str, db: "Session | None" = None) -> Task | None:
     return None
 
 
+def get_task_by_source_ticket_id(source_ticket_id: str, db: "Session | None" = None) -> Task | None:
+    if db is not None:
+        from src.housing import store_db
+        return store_db.get_task_by_source_ticket_id_db(db, source_ticket_id)
+    _seed_tasks()
+    for t in _tasks:
+        if t.source_ticket_id == source_ticket_id:
+            return t
+    return None
+
+
 def create_task(
     title: str,
     description: str,
@@ -551,3 +562,15 @@ def update_ticket_status(
                 t["decision"] = decision
             return Ticket(**t)
     return None
+
+
+def delete_ticket(ticket_id: str, db: "Session | None" = None) -> bool:
+    if db is not None:
+        from src.housing import store_db
+        return store_db.delete_ticket_db(db, ticket_id)
+    global _tickets
+    for i, t in enumerate(_tickets):
+        if t["id"] == ticket_id:
+            _tickets.pop(i)
+            return True
+    return False

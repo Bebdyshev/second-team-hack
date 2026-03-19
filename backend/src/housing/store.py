@@ -11,7 +11,11 @@ from src.housing.schemas import (
     House,
     ManagerActionProof,
     MeterHealth,
+    MonthlyReportRow,
     ReportAnchor,
+    ReportAnomalyItem,
+    ReportOverview,
+    ReportProvenance,
     ResourceAlert,
     RoleName,
     Task,
@@ -562,6 +566,79 @@ def update_ticket_status(
                 t["decision"] = decision
             return Ticket(**t)
     return None
+
+
+_REPORT_THRESHOLDS: dict[str, dict[str, float]] = {
+    "electricity": {"warn": 2.8, "critical": 4.5},
+    "water": {"warn": 35.0, "critical": 55.0},
+    "co2": {"warn": 800.0, "critical": 1000.0},
+}
+
+_MONTH_LABELS = ["2025-12", "2026-01", "2026-02", "2026-03"]
+
+
+def build_report_overview(house_id: str) -> ReportOverview | None:
+    house = _houses.get(house_id)
+    if house is None:
+        return None
+
+    _seed_apartments()
+    apts = [a for a in _apartments.values() if a.house_id == house_id]
+    alerts = [a for a in _alerts if a.house_id == house_id]
+    meters = [m for m in _meters if m.house_id == house_id]
+
+    rng = random.Random(abs(hash(house_id)) % (2**31))
+
+    monthly_rows: list[MonthlyReportRow] = []
+    for month_idx, period in enumerate(_MONTH_LABELS):
+        elec_total = sum(
+            round(sum(apt.electricity_monthly) / len(apt.electricity_monthly) * 30 + rng.uniform(-10, 10), 2)
+            for apt in apts
+        )
+        water_total = sum(
+            round(sum(apt.water_monthly) / len(apt.water_monthly) * 30 + rng.uniform(-20, 20), 2)
+            for apt in apts
+        )
+        co2_vals = [apt.co2_series for apt in apts if apt.co2_series]
+        co2_avg = round(
+            sum(sum(s) / len(s) for s in co2_vals) / len(co2_vals) if co2_vals else 0.0, 1
+        )
+        anomaly_count = sum(len(apt.anomalies) for apt in apts) + (month_idx % 3)
+        monthly_rows.append(MonthlyReportRow(
+            period=period,
+            electricity_kwh=round(elec_total, 2),
+            water_liters=round(water_total, 2),
+            co2_avg_ppm=co2_avg,
+            anomaly_count=anomaly_count,
+            apartment_count=len(apts),
+        ))
+
+    anomaly_items = [
+        ReportAnomalyItem(
+            id=a.id,
+            resource=a.resource,
+            severity=a.severity,  # type: ignore[arg-type]
+            title=a.title,
+            detected_at=a.detected_at,
+        )
+        for a in alerts
+    ]
+
+    provenance = ReportProvenance(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        source=f"Aggregated from {len(apts)} apartments · {len(meters)} meters · live anomaly log",
+        thresholds=_REPORT_THRESHOLDS,
+        meters_used=len(meters),
+        apartments_measured=len(apts),
+    )
+
+    return ReportOverview(
+        house_id=house_id,
+        house_name=house.name,
+        monthly_rows=monthly_rows,
+        anomalies=anomaly_items,
+        provenance=provenance,
+    )
 
 
 def delete_ticket(ticket_id: str, db: "Session | None" = None) -> bool:

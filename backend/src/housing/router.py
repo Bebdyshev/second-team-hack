@@ -31,6 +31,7 @@ from src.housing.schemas import (
     RefreshRequest,
     RegisterRequest,
     ReportAnchor,
+    ReportOverview,
     ResourceAlert,
     MeterHealth,
     Task,
@@ -500,6 +501,18 @@ def anchor_report(
         updated_at=now,
     )
     return store.add_report_anchor(anchor)
+
+
+@router.get("/houses/{house_id}/reports/overview", response_model=ReportOverview)
+def report_overview(
+    house_id: str,
+    user: dict[str, str] = Depends(get_current_user),
+) -> ReportOverview:
+    _assert_house_access(user, house_id)
+    overview = store.build_report_overview(house_id)
+    if overview is None:
+        raise HTTPException(status_code=404, detail="House not found")
+    return overview
 
 
 @router.get("/houses/{house_id}/reports/anchors", response_model=list[ReportAnchor])

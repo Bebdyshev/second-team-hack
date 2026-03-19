@@ -295,3 +295,38 @@ class TicketFollowUpCreate(BaseModel):
 class TicketUpdate(BaseModel):
     status: TicketStatus | None = None
     decision: str | None = None
+
+
+# ── Reports / Transparency ─────────────────────────────────────────────────────
+
+class ReportAnomalyItem(BaseModel):
+    id: str
+    resource: str
+    severity: Literal["low", "medium", "high"]
+    title: str
+    detected_at: str
+
+
+class MonthlyReportRow(BaseModel):
+    period: str          # e.g. "2026-03"
+    electricity_kwh: float
+    water_liters: float
+    co2_avg_ppm: float
+    anomaly_count: int
+    apartment_count: int
+
+
+class ReportProvenance(BaseModel):
+    generated_at: str       # ISO timestamp
+    source: str             # description of data origin
+    thresholds: dict[str, dict[str, float]]  # {resource: {warn: X, critical: Y}}
+    meters_used: int
+    apartments_measured: int
+
+
+class ReportOverview(BaseModel):
+    house_id: str
+    house_name: str
+    monthly_rows: list[MonthlyReportRow]
+    anomalies: list[ReportAnomalyItem]
+    provenance: ReportProvenance

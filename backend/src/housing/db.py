@@ -61,6 +61,7 @@ def _ensure_housing_schema(engine) -> None:
         "ALTER TABLE IF EXISTS housing_tickets ADD COLUMN IF NOT EXISTS complaint_type VARCHAR(64)",
         "ALTER TABLE housing_tasks ALTER COLUMN complaint_type TYPE VARCHAR(64) USING complaint_type::VARCHAR(64)",
         "ALTER TABLE housing_tickets ALTER COLUMN complaint_type TYPE VARCHAR(64) USING complaint_type::VARCHAR(64)",
+        "CREATE TABLE IF NOT EXISTS eco_quest_completions (id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(64) NOT NULL, quest_id VARCHAR(32) NOT NULL, completed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), photo_data TEXT)",
     ]
     with engine.begin() as conn:
         for statement in statements:

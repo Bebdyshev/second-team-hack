@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import logging
 import random
@@ -21,6 +21,11 @@ from src.housing.schemas import (
     CreateTaskRequest,
     DynamicsPoint,
     DynamicsResponse,
+    EcoQuestActivityDay,
+    EcoQuestActivityResponse,
+    EcoQuestCompleteRequest,
+    EcoQuestStatusResponse,
+    EcoQuestStreakResponse,
     House,
     HouseSummary,
     LoginRequest,
@@ -1087,3 +1092,198 @@ def add_ticket_follow_up(
         db=db,
     )
     return updated or ticket
+
+
+# ── Eco Quests (Resident only) ────────────────────────────────────────────────────
+
+ECO_QUEST_IDS = ["eq-1", "eq-2", "eq-3", "eq-4", "eq-5", "eq-6", "eq-7"]
+ECO_QUEST_POINTS = {"eq-1": 10, "eq-2": 15, "eq-3": 20, "eq-4": 12, "eq-5": 25, "eq-6": 12, "eq-7": 18}
+
+
+def _require_resident(user: dict[str, str]):
+    if user.get("role") != "Resident":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Eco Quests are for residents only")
+
+
+@router.post("/eco-quests/complete", response_model=EcoQuestStatusResponse)
+def eco_quest_complete(
+    payload: EcoQuestCompleteRequest,
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> EcoQuestStatusResponse:
+    _require_resident(user)
+    if db is None:
+        raise HTTPException(status_code=503, detail="database unavailable")
+    if payload.quest_id not in ECO_QUEST_IDS:
+        raise HTTPException(status_code=400, detail="invalid quest_id")
+
+    from src.housing.models_db import EcoQuestCompletionModel
+
+    photo_data = payload.photo_base64
+    if photo_data.startswith("data:"):
+        photo_data = photo_data.split(",", 1)[-1] if "," in photo_data else ""
+    if len(photo_data) > 500_000:
+        raise HTTPException(status_code=400, detail="photo too large")
+
+    now = datetime.now(timezone.utc)
+    rec = EcoQuestCompletionModel(
+        id=str(uuid4()),
+        user_id=user["id"],
+        quest_id=payload.quest_id,
+        completed_at=now,
+        photo_data=photo_data,
+    )
+    db.add(rec)
+    db.commit()
+
+    today_str = now.strftime("%Y-%m-%d")
+    completions = (
+        db.query(EcoQuestCompletionModel)
+        .filter(
+            EcoQuestCompletionModel.user_id == user["id"],
+            EcoQuestCompletionModel.completed_at >= datetime.strptime(today_str, "%Y-%m-%d").replace(tzinfo=timezone.utc),
+            EcoQuestCompletionModel.completed_at < datetime.strptime(today_str, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1),
+        )
+        .all()
+    )
+    completed_ids = list({c.quest_id for c in completions})
+    total_points = sum(ECO_QUEST_POINTS.get(q, 0) for q in completed_ids)
+    return EcoQuestStatusResponse(completed=completed_ids, completed_count=len(completed_ids), total_points=total_points)
+
+
+@router.get("/eco-quests/status", response_model=EcoQuestStatusResponse)
+def eco_quest_status(
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> EcoQuestStatusResponse:
+    _require_resident(user)
+    if db is None:
+        return EcoQuestStatusResponse(completed=[], completed_count=0, total_points=0)
+
+    from src.housing.models_db import EcoQuestCompletionModel
+
+    today = datetime.now(timezone.utc).date()
+    start = datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc)
+    end = start + timedelta(days=1)
+    completions = (
+        db.query(EcoQuestCompletionModel)
+        .filter(
+            EcoQuestCompletionModel.user_id == user["id"],
+            EcoQuestCompletionModel.completed_at >= start,
+            EcoQuestCompletionModel.completed_at < end,
+        )
+        .all()
+    )
+    completed_ids = list({c.quest_id for c in completions})
+    total_points = sum(ECO_QUEST_POINTS.get(q, 0) for q in completed_ids)
+    return EcoQuestStatusResponse(completed=completed_ids, completed_count=len(completed_ids), total_points=total_points)
+
+
+def _first_of_month_n_ago(today, n: int):
+    """First day of the month, n months ago."""
+    year, month = today.year, today.month
+    month -= n
+    while month <= 0:
+        month += 12
+        year -= 1
+    return datetime(year, month, 1, tzinfo=timezone.utc).date()
+
+
+@router.get("/eco-quests/activity", response_model=EcoQuestActivityResponse)
+def eco_quest_activity(
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> EcoQuestActivityResponse:
+    _require_resident(user)
+    if db is None:
+        return EcoQuestActivityResponse(days=[])
+
+    from src.housing.models_db import EcoQuestCompletionModel
+
+    today = datetime.now(timezone.utc).date()
+    start = _first_of_month_n_ago(today, 2)
+    completions = (
+        db.query(EcoQuestCompletionModel.quest_id, EcoQuestCompletionModel.completed_at)
+        .filter(
+            EcoQuestCompletionModel.user_id == user["id"],
+            EcoQuestCompletionModel.completed_at >= datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc),
+        )
+        .all()
+    )
+    by_date: dict[str, set[str]] = {}
+    for qid, completed_at in completions:
+        ds = completed_at.strftime("%Y-%m-%d") if hasattr(completed_at, "strftime") else str(completed_at)[:10]
+        if ds not in by_date:
+            by_date[ds] = set()
+        by_date[ds].add(qid)
+    days_list: list[EcoQuestActivityDay] = []
+    d = start
+    while d <= today:
+        ds = d.strftime("%Y-%m-%d")
+        cnt = len(by_date.get(ds, set()))
+        if cnt == 0:
+            level = 0
+        elif cnt <= 2:
+            level = 1
+        elif cnt <= 4:
+            level = 2
+        elif cnt <= 6:
+            level = 3
+        else:
+            level = 4
+        days_list.append(EcoQuestActivityDay(date=ds, level=level))
+        d += timedelta(days=1)
+    return EcoQuestActivityResponse(days=days_list)
+
+
+@router.get("/eco-quests/streak", response_model=EcoQuestStreakResponse)
+def eco_quest_streak(
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> EcoQuestStreakResponse:
+    _require_resident(user)
+    if db is None:
+        return EcoQuestStreakResponse(current_streak=0, last_activity_date=None)
+
+    from src.housing.models_db import EcoQuestCompletionModel
+
+    today = datetime.now(timezone.utc).date()
+    start = datetime.combine(today - timedelta(days=364), datetime.min.time()).replace(tzinfo=timezone.utc)
+    completions = (
+        db.query(EcoQuestCompletionModel.quest_id, EcoQuestCompletionModel.completed_at)
+        .filter(
+            EcoQuestCompletionModel.user_id == user["id"],
+            EcoQuestCompletionModel.completed_at >= start,
+        )
+        .all()
+    )
+    by_date: dict[str, set[str]] = {}
+    for qid, completed_at in completions:
+        ds = completed_at.strftime("%Y-%m-%d") if hasattr(completed_at, "strftime") else str(completed_at)[:10]
+        if ds not in by_date:
+            by_date[ds] = set()
+        by_date[ds].add(qid)
+
+    # Streak = consecutive days (from today backwards) with all 7 tasks done. 1 day skipped = reset.
+    streak = 0
+    last_date = None
+    streak_break_date: str | None = None
+    streak_break_count: int | None = None
+    for i in range(365):
+        d = today - timedelta(days=i)
+        ds = d.strftime("%Y-%m-%d")
+        cnt = len(by_date.get(ds, set()))
+        if cnt >= 7:
+            streak += 1
+            if last_date is None:
+                last_date = ds
+        else:
+            streak_break_date = ds
+            streak_break_count = cnt
+            break
+    return EcoQuestStreakResponse(
+        current_streak=streak,
+        last_activity_date=last_date,
+        streak_break_date=streak_break_date,
+        streak_break_count=streak_break_count,
+    )

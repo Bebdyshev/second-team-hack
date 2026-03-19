@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   DndContext,
   DragOverlay,
@@ -565,7 +566,18 @@ const TaskCardContent = ({ task, isOverlay }: TaskCardContentProps) => {
 // ── Main board page ───────────────────────────────────────────────────────────
 
 const TasksBoardPage = () => {
-  const { accessToken, activeOrganizationId } = useAuth()
+  const router = useRouter()
+  const { accessToken, activeOrganizationId, activeRole } = useAuth()
+
+  useEffect(() => {
+    if (activeRole === 'Resident') {
+      router.replace('/eco-quests')
+    }
+  }, [activeRole, router])
+
+  if (activeRole === 'Resident') {
+    return null
+  }
   const [tasks, setTasks] = useState<Task[]>([])
   const [filterPriority, setFilterPriority] = useState<Priority | 'all'>('all')
   const [filterBuilding, setFilterBuilding] = useState<string>('all')

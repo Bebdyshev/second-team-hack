@@ -14,6 +14,7 @@ import {
   FiMessageCircle,
   FiTrendingUp,
   FiWifi,
+  FiZap,
 } from 'react-icons/fi'
 import { AppOnboarding } from '@/components/app-onboarding'
 import { useAuth } from '@/context/auth-context'
@@ -30,7 +31,8 @@ type NavItem = {
 const mainLinks: NavItem[] = [
   { href: '/dashboard', label: 'Overview', icon: FiHome },
   { href: '/workspace-shell', label: 'My Apartment', labelManager: 'Buildings', icon: FiLayers },
-  { href: '/tasks-board', label: 'Daily Tasks', icon: FiBarChart },
+  { href: '/tasks-board', label: 'Daily Tasks', icon: FiBarChart, managerOnly: true },
+  { href: '/eco-quests', label: 'Eco Quests', icon: FiZap, residentOnly: true },
   { href: '/meters', label: 'Meters', icon: FiDatabase },
   { href: '/alerts', label: 'Alerts', icon: FiAlertTriangle },
   { href: '/maintenance', label: 'Maintenance', icon: FiActivity },
@@ -45,11 +47,13 @@ type AppShellProps = {
   children: React.ReactNode
   rightPanel?: React.ReactNode
   rightPanelOpen?: boolean
+  rightPanelClassName?: string
+  rightPanelScroll?: boolean
 }
 
 const PANEL_WIDTH = 360
 
-export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen = true }: AppShellProps) => {
+export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen = true, rightPanelClassName, rightPanelScroll }: AppShellProps) => {
   const pathname = usePathname()
   const router = useRouter()
   const { user, activeRole, logout } = useAuth()
@@ -180,7 +184,7 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
           </div>
           {rightPanel && (
             <div
-              className='absolute bottom-0 right-0 top-0 z-40 overflow-hidden border-l border-slate-200 bg-white shadow-sm'
+              className={`absolute bottom-0 right-0 top-0 z-40 bg-white ${rightPanelScroll ? 'overflow-y-auto' : 'overflow-hidden'} ${rightPanelClassName ?? 'border-l border-slate-200 shadow-sm'}`}
               style={{
                 width: PANEL_WIDTH,
                 transform: rightPanelOpen ? 'translateX(0)' : 'translateX(100%)',

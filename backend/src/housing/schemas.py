@@ -292,6 +292,33 @@ class TicketFollowUpCreate(BaseModel):
     text: str = Field(min_length=1)
 
 
+class EcoQuestCompleteRequest(BaseModel):
+    quest_id: str
+    photo_base64: str = Field(..., min_length=50)  # data:image/jpeg;base64,... or raw base64
+
+
+class EcoQuestActivityDay(BaseModel):
+    date: str  # YYYY-MM-DD
+    level: int  # 0=empty, 1=partial, 2=full
+
+
+class EcoQuestActivityResponse(BaseModel):
+    days: list[EcoQuestActivityDay]
+
+
+class EcoQuestStreakResponse(BaseModel):
+    current_streak: int
+    last_activity_date: str | None  # most recent day in current streak
+    streak_break_date: str | None = None  # when streak broke (first non-7 day going back)
+    streak_break_count: int | None = None  # how many tasks done that day (0–6)
+
+
+class EcoQuestStatusResponse(BaseModel):
+    completed: list[str]
+    completed_count: int
+    total_points: int
+
+
 class TicketUpdate(BaseModel):
     status: TicketStatus | None = None
     decision: str | None = None

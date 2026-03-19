@@ -54,6 +54,16 @@ class HousingTicketModel(Base):
     follow_ups = relationship("HousingTicketFollowUpModel", back_populates="ticket", order_by="HousingTicketFollowUpModel.created_at")
 
 
+class EcoQuestCompletionModel(Base):
+    __tablename__ = "eco_quest_completions"
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), nullable=False)
+    quest_id = Column(String(32), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=False)
+    photo_data = Column(Text, nullable=True)
+
+
 class HousingTicketFollowUpModel(Base):
     __tablename__ = "housing_ticket_follow_ups"
 

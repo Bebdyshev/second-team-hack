@@ -51,9 +51,6 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
       <aside className='sticky top-0 flex h-screen w-60 shrink-0 self-start flex-col border-r border-slate-200 bg-white'>
         {/* Logo */}
         <div className='flex items-center gap-3 px-5 py-5'>
-          <div className='flex size-8 items-center justify-center rounded-lg bg-blue-100'>
-            <FiZap className='size-4 text-blue-600' />
-          </div>
           <div>
             <p className='text-sm font-semibold text-slate-900'>ResMonitor</p>
             <p className='text-[10px] text-slate-500'>Smart Building OS</p>
@@ -128,8 +125,7 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
           <div
             className='min-w-0 flex-1 overflow-auto p-6'
             style={{
-              marginRight: rightPanel && rightPanelOpen ? PANEL_WIDTH : 0,
-              transition: 'margin-right 0.42s cubic-bezier(0.22, 1, 0.36, 1)',
+              paddingRight: rightPanel && rightPanelOpen ? PANEL_WIDTH + 24 : 24,
             }}
           >
             {children}
@@ -140,7 +136,8 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
               style={{
                 width: PANEL_WIDTH,
                 transform: rightPanelOpen ? 'translateX(0)' : 'translateX(100%)',
-                transition: 'transform 0.42s cubic-bezier(0.22, 1, 0.36, 1)',
+                opacity: rightPanelOpen ? 1 : 0.98,
+                transition: 'transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease-out',
                 willChange: 'transform',
                 pointerEvents: rightPanelOpen ? 'auto' : 'none',
               }}

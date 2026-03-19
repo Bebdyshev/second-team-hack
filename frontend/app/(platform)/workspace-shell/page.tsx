@@ -179,9 +179,8 @@ const WorkspaceShellPage = () => {
           <div className='mb-4 flex items-end justify-between gap-3'>
             <div>
               <h2 className='text-sm font-semibold text-slate-900'>Building summary</h2>
-              <p className='text-xs text-slate-500'>Live dynamics from backend</p>
+              <p className='text-xs text-slate-500'>Live dynamics</p>
             </div>
-            <div className='text-xs text-slate-400'>Data source: API</div>
           </div>
           <div className='mb-4 grid gap-3 sm:grid-cols-4'>
             <div className='rounded-lg bg-slate-50 p-3'><p className='text-xs text-slate-500'>Power</p><p className='text-lg font-semibold text-slate-900'>{Math.round(summary.totalPower)} kWh</p></div>

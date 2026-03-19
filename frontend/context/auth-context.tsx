@@ -25,10 +25,34 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 const ACCESS_TOKEN_KEY = 'proactive_access_token'
 const REFRESH_TOKEN_KEY = 'proactive_refresh_token'
 const ACTIVE_ORG_KEY = 'proactive_active_org'
+const ACCESS_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 24
+const REFRESH_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+
+const getCookie = (name: string) => {
+  if (typeof document == 'undefined') return null
+  const parts = document.cookie.split(';').map((item) => item.trim())
+  const prefix = `${name}=`
+  const tokenPart = parts.find((item) => item.startsWith(prefix))
+  if (!tokenPart) return null
+  return decodeURIComponent(tokenPart.slice(prefix.length))
+}
+
+const setCookie = (name: string, value: string, maxAgeSeconds: number) => {
+  if (typeof document == 'undefined') return
+  const isSecureContext = typeof window != 'undefined' && window.location.protocol == 'https:'
+  document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAgeSeconds}; SameSite=Lax${isSecureContext ? '; Secure' : ''}`
+}
+
+const removeCookie = (name: string) => {
+  if (typeof document == 'undefined') return
+  document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax`
+}
 
 const mapAuthResponse = (response: AuthResponse) => {
-  localStorage.setItem(ACCESS_TOKEN_KEY, response.access_token)
-  localStorage.setItem(REFRESH_TOKEN_KEY, response.refresh_token)
+  setCookie(ACCESS_TOKEN_KEY, response.access_token, ACCESS_TOKEN_MAX_AGE_SECONDS)
+  setCookie(REFRESH_TOKEN_KEY, response.refresh_token, REFRESH_TOKEN_MAX_AGE_SECONDS)
+  localStorage.removeItem(ACCESS_TOKEN_KEY)
+  localStorage.removeItem(REFRESH_TOKEN_KEY)
 
   const defaultOrg = response.user.organizations[0]?.id
   const existingOrg = localStorage.getItem(ACTIVE_ORG_KEY)
@@ -73,13 +97,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     const boot = async () => {
-      const storedAccess = localStorage.getItem(ACCESS_TOKEN_KEY)
-      const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY)
+      const cookieAccess = getCookie(ACCESS_TOKEN_KEY)
+      const cookieRefresh = getCookie(REFRESH_TOKEN_KEY)
+      const legacyAccess = localStorage.getItem(ACCESS_TOKEN_KEY)
+      const legacyRefresh = localStorage.getItem(REFRESH_TOKEN_KEY)
+      const storedAccess = cookieAccess ?? legacyAccess
+      const storedRefresh = cookieRefresh ?? legacyRefresh
       const storedOrg = localStorage.getItem(ACTIVE_ORG_KEY)
 
       if (!storedAccess || !storedRefresh) {
         setIsReady(true)
         return
+      }
+
+      if (!cookieAccess && legacyAccess) {
+        setCookie(ACCESS_TOKEN_KEY, legacyAccess, ACCESS_TOKEN_MAX_AGE_SECONDS)
+        localStorage.removeItem(ACCESS_TOKEN_KEY)
+      }
+      if (!cookieRefresh && legacyRefresh) {
+        setCookie(REFRESH_TOKEN_KEY, legacyRefresh, REFRESH_TOKEN_MAX_AGE_SECONDS)
+        localStorage.removeItem(REFRESH_TOKEN_KEY)
       }
 
       setAccessToken(storedAccess)
@@ -103,6 +140,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setUser(mapped.user)
           setActiveOrganizationId(mapped.activeOrganizationId)
         } catch {
+          removeCookie(ACCESS_TOKEN_KEY)
+          removeCookie(REFRESH_TOKEN_KEY)
           localStorage.removeItem(ACCESS_TOKEN_KEY)
           localStorage.removeItem(REFRESH_TOKEN_KEY)
           localStorage.removeItem(ACTIVE_ORG_KEY)
@@ -140,6 +179,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }
 
   const logout = () => {
+    removeCookie(ACCESS_TOKEN_KEY)
+    removeCookie(REFRESH_TOKEN_KEY)
     localStorage.removeItem(ACCESS_TOKEN_KEY)
     localStorage.removeItem(REFRESH_TOKEN_KEY)
     localStorage.removeItem(ACTIVE_ORG_KEY)

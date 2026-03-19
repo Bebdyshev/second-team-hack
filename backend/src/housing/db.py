@@ -7,7 +7,7 @@ import os
 from typing import Generator
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from src.housing.models_db import Base
@@ -49,8 +49,20 @@ def init_housing_db() -> None:
     engine = _get_engine()
     if engine:
         Base.metadata.create_all(bind=engine)
+        _ensure_housing_schema(engine)
         logger.info("Housing tables created/verified")
         _seed_tasks_if_empty(engine)
+
+
+def _ensure_housing_schema(engine) -> None:
+    """Backfill new nullable columns for existing housing tables."""
+    statements = [
+        "ALTER TABLE IF EXISTS housing_tasks ADD COLUMN IF NOT EXISTS complaint_type VARCHAR(32)",
+        "ALTER TABLE IF EXISTS housing_tickets ADD COLUMN IF NOT EXISTS complaint_type VARCHAR(32)",
+    ]
+    with engine.begin() as conn:
+        for statement in statements:
+            conn.execute(text(statement))
 
 
 def _seed_tasks_if_empty(engine) -> None:
@@ -78,10 +90,11 @@ def _seed_tasks_if_empty(engine) -> None:
         for tid, title, desc, building, cat, prio, st, due in seed_data:
             hid = houses.get(building, "house-1")
             apt = "apt-502" if "502" in desc else None
+            complaint_type = "water" if "water" in desc.lower() else None
             db.add(HousingTaskModel(
                 id=tid, title=title, description=desc, building=building, house_id=hid,
                 category=cat, priority=prio, status=st, due_time=due, apartment=apt,
-                ai_comment=None, source_ticket_id=None, created_at=today,
+                ai_comment=None, source_ticket_id=None, complaint_type=complaint_type, created_at=today,
             ))
         db.commit()
         logger.info("Seeded %d sample tasks", len(seed_data))

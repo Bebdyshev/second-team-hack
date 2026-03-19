@@ -22,7 +22,8 @@ Output ONLY valid JSON with these exact keys (no markdown, no extra text):
   "building": "<building name, e.g. Maple Residence>",
   "apartment": "<apartment id if known, e.g. apt-502, or null>",
   "due_time": "<HH:MM from incident_time or sensible default>",
-  "ai_comment": "<short 1-2 sentence suggestion on what to do, in English>"
+  "ai_comment": "<short 1-2 sentence suggestion on what to do, in English>",
+  "complaint_type": "neighbors" | "water" | "electricity" | "schedule" | "general" | "recommendation"
 }
 
 Rules:
@@ -33,6 +34,21 @@ Rules:
 - building: use the building name provided
 - apartment: use apartment_id if provided (e.g. apt-502)
 - ai_comment: brief actionable tip for the manager (e.g. "Check bathroom pipes first. May need plumber.")
+- complaint_type: choose exactly one:
+  - neighbors: noise/conflict/smoking/behavior complaints about neighbors
+  - water: leaks, low pressure, dirty water, water meters, plumbing
+  - electricity: outages, flickering lights, breakers, electric meters
+  - schedule: timing/schedule issues (heating schedule, cleaning, planned works)
+  - recommendation: suggestion/improvement idea, not a complaint
+  - general: all other complaints that don't match above clearly
+
+Examples:
+- "neighbor is noisy at night" -> neighbors
+- "water leaking from bathroom pipe" -> water
+- "power outage in apartment" -> electricity
+- "heating starts not according to schedule" -> schedule
+- "please install extra smart sensors" -> recommendation
+- "overall dissatisfied with service" -> general
 """
 
 
@@ -99,6 +115,9 @@ Convert to task JSON."""
     priority = parsed.get("priority", "medium")
     if priority not in ("low", "medium", "high", "critical"):
         priority = "medium"
+    complaint_type = parsed.get("complaint_type", "general")
+    if complaint_type not in ("neighbors", "water", "electricity", "schedule", "general", "recommendation"):
+        complaint_type = "general"
 
     return {
         "title": str(parsed.get("title", subject))[:200],
@@ -109,4 +128,5 @@ Convert to task JSON."""
         "apartment": parsed.get("apartment") or apartment_id or None,
         "due_time": str(parsed.get("due_time", incident_time or "12:00"))[:10],
         "ai_comment": (parsed.get("ai_comment") or "")[:500] or None,
+        "complaint_type": complaint_type,
     }

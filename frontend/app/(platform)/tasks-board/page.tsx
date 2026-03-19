@@ -43,6 +43,7 @@ import { apiRequest, ApiError } from '@/lib/api'
 type Priority = 'low' | 'medium' | 'high' | 'critical'
 type Status = 'todo' | 'in_progress' | 'done'
 type Category = 'inspection' | 'repair' | 'meter' | 'complaint' | 'report'
+type ComplaintType = 'neighbors' | 'water' | 'electricity' | 'schedule' | 'general' | 'recommendation'
 
 type Task = {
   id: string
@@ -56,6 +57,7 @@ type Task = {
   apartment?: string
   aiComment?: string | null
   sourceTicketId?: string | null
+  complaintType?: ComplaintType | null
   createdAt: string
 }
 
@@ -72,6 +74,15 @@ const CATEGORY_CONFIG: Record<Category, { label: string }> = {
   meter: { label: 'Meter' },
   complaint: { label: 'Complaint' },
   report: { label: 'Report' },
+}
+
+const COMPLAINT_TYPE_CONFIG: Record<ComplaintType, { label: string; color: string }> = {
+  neighbors: { label: 'Neighbors', color: 'text-purple-700 bg-purple-50' },
+  water: { label: 'Water', color: 'text-cyan-700 bg-cyan-50' },
+  electricity: { label: 'Electricity', color: 'text-yellow-700 bg-yellow-50' },
+  schedule: { label: 'Schedule', color: 'text-indigo-700 bg-indigo-50' },
+  general: { label: 'General', color: 'text-slate-700 bg-slate-100' },
+  recommendation: { label: 'Recommendation', color: 'text-emerald-700 bg-emerald-50' },
 }
 
 const COLUMN_CONFIG: Record<Status, { title: string }> = {
@@ -96,6 +107,7 @@ type ApiTask = {
   apartment?: string
   ai_comment?: string | null
   source_ticket_id?: string | null
+  complaint_type?: ComplaintType | null
   created_at: string
 }
 
@@ -104,6 +116,7 @@ const mapApiTask = (t: ApiTask): Task => ({
   dueTime: t.due_time,
   aiComment: t.ai_comment,
   sourceTicketId: t.source_ticket_id,
+  complaintType: t.complaint_type,
   createdAt: t.created_at,
 })
 
@@ -143,6 +156,7 @@ type TaskCardContentProps = { task: Task; isOverlay?: boolean }
 const TaskCardContent = ({ task, isOverlay }: TaskCardContentProps) => {
   const priorityCfg = PRIORITY_CONFIG[task.priority]
   const categoryCfg = CATEGORY_CONFIG[task.category]
+  const complaintTypeCfg = task.complaintType ? COMPLAINT_TYPE_CONFIG[task.complaintType] : null
   return (
     <article className={`rounded-md bg-white p-2.5 ${isOverlay ? 'shadow-lg ring-1 ring-slate-200' : ''}`}>
       <div className='mb-1.5 flex items-start justify-between gap-1.5'>
@@ -154,6 +168,11 @@ const TaskCardContent = ({ task, isOverlay }: TaskCardContentProps) => {
           <span className='inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600'>
             {categoryCfg.label}
           </span>
+          {complaintTypeCfg && (
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${complaintTypeCfg.color}`}>
+              {complaintTypeCfg.label}
+            </span>
+          )}
         </div>
         <span className='shrink-0 text-[10px] font-medium text-slate-400'>{task.dueTime}</span>
       </div>
@@ -174,6 +193,7 @@ const TasksBoardPage = () => {
   const [tasks, setTasks] = useState<Task[]>([])
   const [filterPriority, setFilterPriority] = useState<Priority | 'all'>('all')
   const [filterBuilding, setFilterBuilding] = useState<string>('all')
+  const [filterComplaintType, setFilterComplaintType] = useState<ComplaintType | 'all'>('all')
   const [showNewTaskForm, setShowNewTaskForm] = useState(false)
   const [activeTask, setActiveTask] = useState<Task | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -202,6 +222,7 @@ const TasksBoardPage = () => {
   const filteredTasks = tasks.filter((task) => {
     if (filterPriority !== 'all' && task.priority !== filterPriority) return false
     if (filterBuilding !== 'all' && task.building !== filterBuilding) return false
+    if (filterComplaintType !== 'all' && task.complaintType !== filterComplaintType) return false
     return true
   })
 
@@ -307,6 +328,21 @@ const TasksBoardPage = () => {
             <option value='all'>Building</option>
             {buildings.map((b) => (
               <option key={b} value={b}>{b}</option>
+            ))}
+          </select>
+          <FiChevronDown className='pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-slate-400' />
+        </div>
+
+        <div className='relative'>
+          <select
+            value={filterComplaintType}
+            onChange={(e) => setFilterComplaintType(e.target.value as ComplaintType | 'all')}
+            className='h-7 appearance-none rounded-md bg-white py-0 pl-2.5 pr-7 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-300'
+            aria-label='Filter by complaint type'
+          >
+            <option value='all'>Complaint type</option>
+            {(Object.keys(COMPLAINT_TYPE_CONFIG) as ComplaintType[]).map((key) => (
+              <option key={key} value={key}>{COMPLAINT_TYPE_CONFIG[key].label}</option>
             ))}
           </select>
           <FiChevronDown className='pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-slate-400' />
@@ -425,6 +461,7 @@ type TaskCardProps = {
 const TaskCard = ({ task, onDelete }: TaskCardProps) => {
   const priorityCfg = PRIORITY_CONFIG[task.priority]
   const categoryCfg = CATEGORY_CONFIG[task.category]
+  const complaintTypeCfg = task.complaintType ? COMPLAINT_TYPE_CONFIG[task.complaintType] : null
 
   return (
     <article className='group rounded-md bg-white p-2.5'>
@@ -437,6 +474,11 @@ const TaskCard = ({ task, onDelete }: TaskCardProps) => {
           <span className='inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600'>
             {categoryCfg.label}
           </span>
+          {complaintTypeCfg && (
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${complaintTypeCfg.color}`}>
+              {complaintTypeCfg.label}
+            </span>
+          )}
         </div>
         <span className='shrink-0 text-[10px] font-medium text-slate-400'>{task.dueTime}</span>
       </div>

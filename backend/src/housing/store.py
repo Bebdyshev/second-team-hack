@@ -314,6 +314,7 @@ def _seed_tasks() -> None:
             apartment=apt,
             ai_comment=None,
             source_ticket_id=None,
+            complaint_type="water" if "water" in desc.lower() else None,
             created_at=today,
         ))
 
@@ -348,6 +349,7 @@ def create_task(
     apartment: str | None = None,
     ai_comment: str | None = None,
     source_ticket_id: str | None = None,
+    complaint_type: str | None = None,
     db: "Session | None" = None,
 ) -> Task:
     if db is not None:
@@ -357,7 +359,7 @@ def create_task(
             hid = "all"
         return store_db.create_task_db(
             db, title, description, building, category, priority, due_time, hid,
-            apartment=apartment, ai_comment=ai_comment, source_ticket_id=source_ticket_id,
+            apartment=apartment, ai_comment=ai_comment, source_ticket_id=source_ticket_id, complaint_type=complaint_type,
         )
     _seed_tasks()
     hid = house_id or _resolve_house_id(building)
@@ -376,6 +378,7 @@ def create_task(
         apartment=apartment,
         ai_comment=ai_comment,
         source_ticket_id=source_ticket_id,
+        complaint_type=complaint_type,
         created_at=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
     )
     _tasks.append(task)
@@ -439,13 +442,14 @@ def create_ticket(
     incident_date: str,
     incident_time: str,
     attachments: list[TicketAttachment],
+    complaint_type: str | None = None,
     db: "Session | None" = None,
 ) -> Ticket:
     if db is not None:
         from src.housing import store_db
         return store_db.create_ticket_db(
             db, house_id, resident_id, resident_name, resident_email, apartment_id,
-            subject, description, incident_date, incident_time, attachments,
+            subject, description, incident_date, incident_time, attachments, complaint_type=complaint_type,
         )
     now = now_utc()
     ticket_id = f"ticket-{uuid4().hex[:12]}"
@@ -467,6 +471,7 @@ def create_ticket(
         "updated_at": now,
         "viewed_at": None,
         "decision": None,
+        "complaint_type": complaint_type,
     }
     _tickets.append(ticket)
     return Ticket(**ticket)

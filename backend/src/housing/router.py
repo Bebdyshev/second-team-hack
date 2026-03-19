@@ -354,6 +354,7 @@ def create_task(
         category=payload.category,
         priority=payload.priority,
         due_time=payload.due_time,
+        complaint_type=payload.complaint_type,
         house_id=house_id,
         db=db,
     )
@@ -425,6 +426,17 @@ def create_ticket(
     house = store.get_house(user["house_id"])
     building_name = house.name if house else "Maple Residence"
 
+    # Transform ticket to task via Groq Qwen3-32B and add to Daily Tasks
+    task_data = groq_client.transform_ticket_to_task(
+        subject=payload.subject,
+        description=payload.description,
+        incident_date=payload.incident_date,
+        incident_time=payload.incident_time,
+        apartment_id=apt_id,
+        building_name=building_name,
+    )
+    complaint_type = task_data.get("complaint_type", "general") if task_data else "general"
+
     ticket = store.create_ticket(
         house_id=user["house_id"],
         resident_id=user["id"],
@@ -436,18 +448,10 @@ def create_ticket(
         incident_date=payload.incident_date,
         incident_time=payload.incident_time,
         attachments=payload.attachments,
+        complaint_type=complaint_type,
         db=db,
     )
 
-    # Transform ticket to task via Groq Qwen3-32B and add to Daily Tasks
-    task_data = groq_client.transform_ticket_to_task(
-        subject=payload.subject,
-        description=payload.description,
-        incident_date=payload.incident_date,
-        incident_time=payload.incident_time,
-        apartment_id=apt_id,
-        building_name=building_name,
-    )
     if task_data:
         store.create_task(
             title=task_data["title"],
@@ -460,6 +464,7 @@ def create_ticket(
             apartment=task_data.get("apartment"),
             ai_comment=task_data.get("ai_comment"),
             source_ticket_id=ticket.id,
+            complaint_type=complaint_type,
             db=db,
         )
     else:
@@ -475,6 +480,7 @@ def create_ticket(
             apartment=apt_id,
             ai_comment=None,
             source_ticket_id=ticket.id,
+            complaint_type="general",
             db=db,
         )
 

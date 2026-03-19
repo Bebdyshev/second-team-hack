@@ -25,6 +25,7 @@ def _task_from_row(m: HousingTaskModel) -> Task:
         apartment=m.apartment,
         ai_comment=m.ai_comment,
         source_ticket_id=m.source_ticket_id,
+        complaint_type=m.complaint_type,
         created_at=m.created_at,
     )
 
@@ -60,6 +61,7 @@ def _ticket_from_row(m: HousingTicketModel) -> Ticket:
         updated_at=m.updated_at,
         viewed_at=m.viewed_at,
         decision=m.decision,
+        complaint_type=m.complaint_type,
     )
 
 
@@ -87,6 +89,7 @@ def create_task_db(
     apartment: str | None = None,
     ai_comment: str | None = None,
     source_ticket_id: str | None = None,
+    complaint_type: str | None = None,
 ) -> Task:
     task_id = f"t-{uuid4().hex[:8]}"
     created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -103,6 +106,7 @@ def create_task_db(
         apartment=apartment,
         ai_comment=ai_comment,
         source_ticket_id=source_ticket_id,
+        complaint_type=complaint_type,
         created_at=created_at,
     )
     db.add(row)
@@ -154,6 +158,7 @@ def create_ticket_db(
     incident_date: str,
     incident_time: str,
     attachments: list[TicketAttachment],
+    complaint_type: str | None = None,
 ) -> Ticket:
     now = datetime.now(timezone.utc)
     ticket_id = f"ticket-{uuid4().hex[:12]}"
@@ -175,6 +180,7 @@ def create_ticket_db(
         updated_at=now,
         viewed_at=None,
         decision=None,
+        complaint_type=complaint_type,
     )
     db.add(row)
     db.commit()

@@ -172,6 +172,7 @@ class ProveActionRequest(BaseModel):
 TaskStatus = Literal["todo", "in_progress", "done"]
 TaskPriority = Literal["low", "medium", "high", "critical"]
 TaskCategory = Literal["inspection", "repair", "meter", "complaint", "report"]
+ComplaintType = Literal["neighbors", "water", "electricity", "schedule", "general", "recommendation"]
 
 
 class Task(BaseModel):
@@ -187,6 +188,7 @@ class Task(BaseModel):
     apartment: str | None = None
     ai_comment: str | None = None
     source_ticket_id: str | None = None
+    complaint_type: ComplaintType | None = None
     created_at: str
 
 
@@ -198,6 +200,7 @@ class CreateTaskRequest(BaseModel):
     category: TaskCategory = "inspection"
     priority: TaskPriority = "medium"
     due_time: str = "12:00"
+    complaint_type: ComplaintType | None = None
 
 
 class UpdateTaskRequest(BaseModel):
@@ -243,6 +246,7 @@ class Ticket(BaseModel):
     updated_at: datetime
     viewed_at: datetime | None = None
     decision: str | None = None
+    complaint_type: ComplaintType | None = None
 
 
 class TicketCreate(BaseModel):

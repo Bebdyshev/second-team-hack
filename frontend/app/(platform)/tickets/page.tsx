@@ -12,6 +12,7 @@ import { apiRequest, ApiError } from '@/lib/api'
 
 type TicketAttachment = { name: string; url?: string }
 type TicketFollowUp = { id: string; text: string; author_id: string; author_name: string; author_role: string; created_at: string }
+type ComplaintType = 'neighbors' | 'water' | 'electricity' | 'schedule' | 'general' | 'recommendation'
 type Ticket = {
   id: string
   house_id: string
@@ -30,6 +31,7 @@ type Ticket = {
   updated_at: string
   viewed_at: string | null
   decision: string | null
+  complaint_type: ComplaintType | null
 }
 
 const statusLabel: Record<string, string> = {
@@ -42,6 +44,24 @@ const statusColor: Record<string, string> = {
   sent: 'bg-amber-100 text-amber-700',
   viewing: 'bg-blue-100 text-blue-700',
   decision: 'bg-emerald-100 text-emerald-700',
+}
+
+const complaintTypeLabel: Record<ComplaintType, string> = {
+  neighbors: 'Neighbors',
+  water: 'Water',
+  electricity: 'Electricity',
+  schedule: 'Schedule',
+  general: 'General',
+  recommendation: 'Recommendation',
+}
+
+const complaintTypeColor: Record<ComplaintType, string> = {
+  neighbors: 'bg-purple-100 text-purple-700',
+  water: 'bg-cyan-100 text-cyan-700',
+  electricity: 'bg-yellow-100 text-yellow-700',
+  schedule: 'bg-indigo-100 text-indigo-700',
+  general: 'bg-slate-100 text-slate-700',
+  recommendation: 'bg-emerald-100 text-emerald-700',
 }
 
 const TicketsPage = () => {
@@ -148,6 +168,11 @@ const TicketsPage = () => {
                   <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColor[t.status]}`}>
                     {statusLabel[t.status]}
                   </span>
+                  {t.complaint_type && (
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${complaintTypeColor[t.complaint_type]}`}>
+                      {complaintTypeLabel[t.complaint_type]}
+                    </span>
+                  )}
                   {t.follow_ups.length > 0 && (
                     <span className='flex shrink-0 items-center gap-1 text-xs text-slate-400'>
                       <FiMessageCircle className='size-3.5' />
@@ -386,6 +411,11 @@ function TicketDetailModal({
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColor[ticket.status]}`}>
               {statusLabel[ticket.status]}
             </span>
+            {ticket.complaint_type && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${complaintTypeColor[ticket.complaint_type]}`}>
+                {complaintTypeLabel[ticket.complaint_type]}
+              </span>
+            )}
             <span className='text-xs text-slate-500'>
               {ticket.resident_name} · Apt {ticket.apartment_id.replace('apt-', '')}
             </span>

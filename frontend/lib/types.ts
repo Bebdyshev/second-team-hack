@@ -15,6 +15,7 @@ export type UserProfile = {
   full_name: string
   organizations: Organization[]
   memberships: Membership[]
+  apartment_id?: string | null
 }
 
 export type AuthResponse = {

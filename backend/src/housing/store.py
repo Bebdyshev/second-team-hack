@@ -17,6 +17,9 @@ from src.housing.schemas import (
     UserProfile,
     Organization,
     Membership,
+    Ticket,
+    TicketAttachment,
+    TicketFollowUp,
 )
 from src.utils.auth_utils import hash_password, verify_password
 
@@ -44,101 +47,7 @@ _apartments: dict[str, Apartment] = {}
 _report_anchors: list[ReportAnchor] = []
 _manager_action_proofs: list[ManagerActionProof] = []
 _tasks: list[Task] = []
-
-
-def _seed_tasks() -> None:
-    if _tasks:
-        return
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    seed_data = [
-        ("t-1", "house-1", "Maple Residence", "Morning meter readings check", "Verify all electricity and water meters are syncing correctly.", "meter", "high", "todo", "09:00", None),
-        ("t-2", "house-2", "River Park", "Inspect gas valve — Section C", "Scheduled inspection of gas collector valve after last week's pressure anomaly report.", "inspection", "critical", "todo", "10:30", None),
-        ("t-3", "house-1", "Maple Residence", "Respond to water leak complaint", "Apt 502 reported damp spots on the ceiling.", "complaint", "high", "todo", "11:00", "apt-502"),
-        ("t-4", "house-1", "Maple Residence", "Replace water meter — Block B", "The water meter m-2 has been showing weak signal for 3 days.", "repair", "medium", "in_progress", "13:00", None),
-        ("t-5", "house-3", "Oak Gardens", "Calibrate heating sensors", "Annual calibration of the heating sensor array on floors 5-12.", "meter", "medium", "in_progress", "14:00", None),
-        ("t-6", "house-1", "All buildings", "Review weekly consumption report", "Compile and review aggregated consumption data.", "report", "low", "todo", "16:00", None),
-        ("t-7", "house-1", "Maple Residence", "Upload daily manager summary", "Publish short daily summary with completed maintenance.", "report", "medium", "todo", "15:00", None),
-        ("t-8", "house-3", "Oak Gardens", "Update elevator power baseline", "After last week's alert, the elevator power baseline needs to be recalculated.", "report", "low", "done", "08:00", None),
-        ("t-9", "house-2", "River Park", "Morning building walkthrough", "Visual inspection of common areas, parking, lobby.", "inspection", "low", "done", "07:30", None),
-    ]
-    for row in seed_data:
-        tid, hid, bld, title, desc, cat, pri, st, due, apt = row
-        _tasks.append(Task(
-            id=tid, title=title, description=desc, building=bld, house_id=hid,
-            category=cat, priority=pri, status=st, due_time=due, apartment=apt, created_at=today,
-        ))
-
-
-def _building_to_house_id(building: str) -> str:
-    for house in _houses.values():
-        if house.name == building:
-            return house.id
-    return "house-1"
-
-
-def list_tasks(house_id: str) -> list[Task]:
-    _seed_tasks()
-    return [t for t in _tasks if t.house_id == house_id or t.house_id == "all"]
-
-
-def list_tasks_all_houses(house_ids: list[str]) -> list[Task]:
-    _seed_tasks()
-    seen = set(house_ids) | {"all"}
-    return [t for t in _tasks if t.house_id in seen]
-
-
-def get_task(task_id: str) -> Task | None:
-    _seed_tasks()
-    for t in _tasks:
-        if t.id == task_id:
-            return t
-    return None
-
-
-def create_task(title: str, description: str, building: str, category: str, priority: str, due_time: str, apartment: str | None, house_id: str) -> Task:
-    _seed_tasks()
-    hid = house_id or _building_to_house_id(building)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    task = Task(
-        id=f"t-{uuid4().hex[:8]}",
-        title=title,
-        description=description or "",
-        building=building,
-        house_id=hid,
-        category=category,
-        priority=priority,
-        status="todo",
-        due_time=due_time,
-        apartment=apartment,
-        created_at=today,
-    )
-    _tasks.append(task)
-    return task
-
-
-def update_task(task_id: str, status: str | None = None, title: str | None = None, description: str | None = None) -> Task | None:
-    _seed_tasks()
-    for i, t in enumerate(_tasks):
-        if t.id == task_id:
-            data = t.model_dump()
-            if status is not None:
-                data["status"] = status
-            if title is not None:
-                data["title"] = title
-            if description is not None:
-                data["description"] = description
-            _tasks[i] = Task.model_validate(data)
-            return _tasks[i]
-    return None
-
-
-def delete_task(task_id: str) -> bool:
-    _seed_tasks()
-    for i, t in enumerate(_tasks):
-        if t.id == task_id:
-            _tasks.pop(i)
-            return True
-    return False
+_tickets: list[dict] = []
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -231,6 +140,16 @@ _users_by_email: dict[str, dict[str, str]] = {
         "apartment_id": "apt-804",
         "refresh_token": "",
     },
+    "resident2@resmonitor.kz": {
+        "id": "user-resident-2",
+        "email": "resident2@resmonitor.kz",
+        "password_hash": hash_password("resident123"),
+        "full_name": "Maria Petrova",
+        "role": "Resident",
+        "house_id": "house-1",
+        "apartment_id": "apt-502",
+        "refresh_token": "",
+    },
 }
 
 _users_by_id: dict[str, dict[str, str]] = {item["id"]: item for item in _users_by_email.values()}
@@ -238,12 +157,16 @@ _users_by_id: dict[str, dict[str, str]] = {item["id"]: item for item in _users_b
 
 def make_profile(user: dict[str, str]) -> UserProfile:
     house = _houses[user["house_id"]]
+    apt_id = user.get("apartment_id") or None
+    if apt_id == "":
+        apt_id = None
     return UserProfile(
         id=user["id"],
         email=user["email"],
         full_name=user["full_name"],
         organizations=[Organization(id=house.id, name=house.name)],
         memberships=[Membership(organization_id=house.id, organization_name=house.name, role=user["role"])],
+        apartment_id=apt_id,
     )
 
 
@@ -454,3 +377,89 @@ def delete_task(task_id: str) -> bool:
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# ── Tickets ───────────────────────────────────────────────────────────────────
+def create_ticket(
+    house_id: str,
+    resident_id: str,
+    resident_name: str,
+    resident_email: str,
+    apartment_id: str,
+    subject: str,
+    description: str,
+    incident_date: str,
+    incident_time: str,
+    attachments: list[TicketAttachment],
+) -> Ticket:
+    now = now_utc()
+    ticket_id = f"ticket-{uuid4().hex[:12]}"
+    ticket = {
+        "id": ticket_id,
+        "house_id": house_id,
+        "resident_id": resident_id,
+        "resident_name": resident_name,
+        "resident_email": resident_email,
+        "apartment_id": apartment_id,
+        "subject": subject,
+        "description": description,
+        "incident_date": incident_date,
+        "incident_time": incident_time,
+        "attachments": [a.model_dump() for a in attachments],
+        "status": "sent",
+        "follow_ups": [],
+        "created_at": now,
+        "updated_at": now,
+        "viewed_at": None,
+        "decision": None,
+    }
+    _tickets.append(ticket)
+    return Ticket(**ticket)
+
+
+def get_ticket(ticket_id: str) -> Ticket | None:
+    for t in _tickets:
+        if t["id"] == ticket_id:
+            return Ticket(**t)
+    return None
+
+
+def list_tickets_for_resident(resident_id: str) -> list[Ticket]:
+    items = [t for t in _tickets if t["resident_id"] == resident_id]
+    return sorted([Ticket(**t) for t in items], key=lambda x: x.updated_at, reverse=True)
+
+
+def list_tickets_for_manager(house_id: str) -> list[Ticket]:
+    items = [t for t in _tickets if t["house_id"] == house_id]
+    return sorted([Ticket(**t) for t in items], key=lambda x: x.updated_at, reverse=True)
+
+
+def add_follow_up(ticket_id: str, author_id: str, author_name: str, author_role: str, text: str) -> Ticket | None:
+    for t in _tickets:
+        if t["id"] == ticket_id:
+            now = now_utc()
+            fu = {
+                "id": f"fu-{uuid4().hex[:8]}",
+                "text": text,
+                "author_id": author_id,
+                "author_name": author_name,
+                "author_role": author_role,
+                "created_at": now,
+            }
+            t["follow_ups"].append(fu)
+            t["updated_at"] = now
+            return Ticket(**t)
+    return None
+
+
+def update_ticket_status(ticket_id: str, status: str, viewed_at: datetime | None = None, decision: str | None = None) -> Ticket | None:
+    for t in _tickets:
+        if t["id"] == ticket_id:
+            t["status"] = status
+            t["updated_at"] = now_utc()
+            if viewed_at is not None:
+                t["viewed_at"] = viewed_at
+            if decision is not None:
+                t["decision"] = decision
+            return Ticket(**t)
+    return None

@@ -11,6 +11,7 @@ import {
   FiWind,
   FiZap,
 } from 'react-icons/fi'
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 import { AppShell } from '@/components/app-shell'
@@ -83,18 +84,27 @@ type ManagerActionProof = {
   created_at: string
 }
 
+type ApartmentSummaryResponse = {
+  apartment: { id: string; number: string; score: number; status: string }
+  live_snapshot: { electricity: number; water: number; co2: number; humidity: number; savings: number }
+}
+
 const DashboardPage = () => {
-  const { accessToken, activeOrganizationId } = useAuth()
+  const { accessToken, activeOrganizationId, user, activeRole } = useAuth()
   const [houses, setHouses] = useState<HouseItem[]>([])
   const [alerts, setAlerts] = useState<ResourceAlert[]>([])
   const [meters, setMeters] = useState<MeterItem[]>([])
   const [summary, setSummary] = useState<HouseSummary | null>(null)
+  const [apartmentNumber, setApartmentNumber] = useState<string | null>(null)
+  const [apartmentScore, setApartmentScore] = useState<number | null>(null)
   const [electricityDelta, setElectricityDelta] = useState(0)
   const [waterDelta, setWaterDelta] = useState(0)
   const [proofs, setProofs] = useState<ManagerActionProof[]>([])
   const [proofError, setProofError] = useState('')
   const [pageError, setPageError] = useState('')
   const activeHouseId = activeOrganizationId ?? 'house-1'
+  const isResident = activeRole === 'Resident'
+  const myApartmentId = user?.apartment_id
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -103,31 +113,66 @@ const DashboardPage = () => {
       setProofError('')
 
       try {
-        const [housesResponse, summaryResponse, alertsResponse, metersResponse, proofsResponse, electricityDynamics, waterDynamics] = await Promise.all([
-          apiRequest<HouseItem[]>('/houses', { token: accessToken }),
-          apiRequest<HouseSummary>(`/houses/${activeHouseId}/summary`, { token: accessToken }),
-          apiRequest<ResourceAlert[]>(`/alerts?house_id=${activeHouseId}`, { token: accessToken }),
-          apiRequest<MeterItem[]>(`/meters?house_id=${activeHouseId}`, { token: accessToken }),
-          apiRequest<ManagerActionProof[]>(`/manager-actions/proofs?house_id=${activeHouseId}`, { token: accessToken }),
-          apiRequest<DynamicsResponse>(`/houses/${activeHouseId}/dynamics?resource=electricity&period=24h`, { token: accessToken }),
-          apiRequest<DynamicsResponse>(`/houses/${activeHouseId}/dynamics?resource=water&period=24h`, { token: accessToken }),
-        ])
-
-        setHouses(housesResponse)
-        setSummary(summaryResponse)
-        setAlerts(alertsResponse)
-        setMeters(metersResponse)
-        setProofs(proofsResponse)
-
-        const powerStart = electricityDynamics.dynamics[0]?.value ?? 0
-        const powerEnd = electricityDynamics.dynamics[electricityDynamics.dynamics.length - 1]?.value ?? 0
-        const waterStart = waterDynamics.dynamics[0]?.value ?? 0
-        const waterEnd = waterDynamics.dynamics[waterDynamics.dynamics.length - 1]?.value ?? 0
-
-        const powerDelta = powerStart == 0 ? 0 : ((powerEnd - powerStart) / powerStart) * 100
-        const waterDeltaValue = waterStart == 0 ? 0 : ((waterEnd - waterStart) / waterStart) * 100
-        setElectricityDelta(Number(powerDelta.toFixed(1)))
-        setWaterDelta(Number(waterDeltaValue.toFixed(1)))
+        if (isResident && myApartmentId) {
+          const [apartmentSummary, electricityDynamics, waterDynamics, alertsResponse, metersResponse, proofsResponse] = await Promise.all([
+            apiRequest<ApartmentSummaryResponse>(`/apartments/${myApartmentId}/summary`, { token: accessToken }),
+            apiRequest<DynamicsResponse>(`/apartments/${myApartmentId}/dynamics?resource=electricity&period=24h`, { token: accessToken }),
+            apiRequest<DynamicsResponse>(`/apartments/${myApartmentId}/dynamics?resource=water&period=24h`, { token: accessToken }),
+            apiRequest<ResourceAlert[]>(`/alerts?house_id=${activeHouseId}`, { token: accessToken }),
+            apiRequest<MeterItem[]>(`/meters?house_id=${activeHouseId}`, { token: accessToken }),
+            apiRequest<ManagerActionProof[]>(`/manager-actions/proofs?house_id=${activeHouseId}`, { token: accessToken }),
+          ])
+          const elecValues = electricityDynamics.dynamics.map((d) => d.value)
+          const waterValues = waterDynamics.dynamics.map((d) => d.value)
+          const totalPower = elecValues.reduce((a, b) => a + b, 0)
+          const totalWater = waterValues.reduce((a, b) => a + b, 0)
+          setSummary({
+            total_power: totalPower,
+            total_water: totalWater,
+            average_air: Math.round(apartmentSummary.live_snapshot.co2),
+            city_impact: Math.min(84, Math.max(18, Math.round(totalPower / 16))),
+            alerts_count: 0,
+          })
+          setApartmentNumber(apartmentSummary.apartment.number)
+          setApartmentScore(apartmentSummary.apartment.score)
+          setHouses([])
+          setAlerts(alertsResponse)
+          setMeters(metersResponse)
+          setProofs(proofsResponse)
+          const powerStart = elecValues[0] ?? 0
+          const powerEnd = elecValues[elecValues.length - 1] ?? 0
+          const waterStart = waterValues[0] ?? 0
+          const waterEnd = waterValues[waterValues.length - 1] ?? 0
+          const powerDelta = powerStart == 0 ? 0 : ((powerEnd - powerStart) / powerStart) * 100
+          const waterDeltaValue = waterStart == 0 ? 0 : ((waterEnd - waterStart) / waterStart) * 100
+          setElectricityDelta(Number(powerDelta.toFixed(1)))
+          setWaterDelta(Number(waterDeltaValue.toFixed(1)))
+        } else {
+          const [housesResponse, summaryResponse, alertsResponse, metersResponse, proofsResponse, electricityDynamics, waterDynamics] = await Promise.all([
+            apiRequest<HouseItem[]>('/houses', { token: accessToken }),
+            apiRequest<HouseSummary>(`/houses/${activeHouseId}/summary`, { token: accessToken }),
+            apiRequest<ResourceAlert[]>(`/alerts?house_id=${activeHouseId}`, { token: accessToken }),
+            apiRequest<MeterItem[]>(`/meters?house_id=${activeHouseId}`, { token: accessToken }),
+            apiRequest<ManagerActionProof[]>(`/manager-actions/proofs?house_id=${activeHouseId}`, { token: accessToken }),
+            apiRequest<DynamicsResponse>(`/houses/${activeHouseId}/dynamics?resource=electricity&period=24h`, { token: accessToken }),
+            apiRequest<DynamicsResponse>(`/houses/${activeHouseId}/dynamics?resource=water&period=24h`, { token: accessToken }),
+          ])
+          setHouses(housesResponse)
+          setSummary(summaryResponse)
+          setApartmentNumber(null)
+          setApartmentScore(null)
+          setAlerts(alertsResponse)
+          setMeters(metersResponse)
+          setProofs(proofsResponse)
+          const powerStart = electricityDynamics.dynamics[0]?.value ?? 0
+          const powerEnd = electricityDynamics.dynamics[electricityDynamics.dynamics.length - 1]?.value ?? 0
+          const waterStart = waterDynamics.dynamics[0]?.value ?? 0
+          const waterEnd = waterDynamics.dynamics[waterDynamics.dynamics.length - 1]?.value ?? 0
+          const powerDelta = powerStart == 0 ? 0 : ((powerEnd - powerStart) / powerStart) * 100
+          const waterDeltaValue = waterStart == 0 ? 0 : ((waterEnd - waterStart) / waterStart) * 100
+          setElectricityDelta(Number(powerDelta.toFixed(1)))
+          setWaterDelta(Number(waterDeltaValue.toFixed(1)))
+        }
       } catch (requestError) {
         const message = requestError instanceof ApiError ? requestError.message : 'Failed to load dashboard data'
         setPageError(message)
@@ -136,7 +181,7 @@ const DashboardPage = () => {
 
     }
     void loadDashboard()
-  }, [accessToken, activeHouseId])
+  }, [accessToken, activeHouseId, isResident, myApartmentId])
 
   const totalUnits = houses.reduce((acc, house) => acc + house.units_count, 0)
   const averageOccupancy = houses.length == 0 ? 0 : Math.round(houses.reduce((acc, house) => acc + house.occupancy_rate, 0) / houses.length)
@@ -179,19 +224,22 @@ const DashboardPage = () => {
   ]
 
   return (
-    <AppShell title='Overview' subtitle='Real-time resource monitoring across all buildings'>
+    <AppShell
+      title='Overview'
+      subtitle={isResident && apartmentNumber ? `Your apartment #${apartmentNumber}` : 'Real-time resource monitoring across all buildings'}
+    >
       {pageError && <p className='mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>{pageError}</p>}
       {/* Top KPI row */}
       <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
         <article className='rounded-xl bg-white p-5 shadow-sm'>
           <div className='flex items-center justify-between'>
-            <p className='text-sm text-slate-500'>Buildings</p>
+            <p className='text-sm text-slate-500'>{isResident ? 'My apartment' : 'Buildings'}</p>
             <span className='flex size-9 items-center justify-center rounded-lg bg-blue-100 text-blue-600'>
               <FiHome className='size-4' />
             </span>
           </div>
-          <p className='mt-3 text-3xl font-bold text-slate-900'>{houses.length}</p>
-          <p className='mt-1 text-xs text-slate-400'>{totalUnits} total apartments</p>
+          <p className='mt-3 text-3xl font-bold text-slate-900'>{isResident && apartmentNumber ? `#${apartmentNumber}` : houses.length}</p>
+          <p className='mt-1 text-xs text-slate-400'>{isResident ? 'Your unit' : `${totalUnits} total apartments`}</p>
         </article>
 
         <article className='rounded-xl bg-white p-5 shadow-sm'>
@@ -207,13 +255,13 @@ const DashboardPage = () => {
 
         <article className='rounded-xl bg-white p-5 shadow-sm'>
           <div className='flex items-center justify-between'>
-            <p className='text-sm text-slate-500'>Avg. occupancy</p>
+            <p className='text-sm text-slate-500'>{isResident ? 'Eco score' : 'Avg. occupancy'}</p>
             <span className='flex size-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600'>
               <FiArrowUpRight className='size-4' />
             </span>
           </div>
-          <p className='mt-3 text-3xl font-bold text-slate-900'>{averageOccupancy}%</p>
-          <p className='mt-1 text-xs text-slate-400'>Across all buildings</p>
+          <p className='mt-3 text-3xl font-bold text-slate-900'>{isResident && apartmentScore != null ? apartmentScore : `${averageOccupancy}%`}</p>
+          <p className='mt-1 text-xs text-slate-400'>{isResident ? 'Your unit' : 'Across all buildings'}</p>
         </article>
 
         <article className='rounded-xl bg-white p-5 shadow-sm'>
@@ -271,28 +319,47 @@ const DashboardPage = () => {
 
       {/* Lower section */}
       <div className='mt-5 grid gap-5 lg:grid-cols-2'>
-        {/* Buildings list */}
+        {/* Buildings list (manager) or My apartment (resident) */}
         <article className='rounded-xl bg-white p-5 shadow-sm'>
           <div className='mb-4 flex items-center justify-between'>
-            <h2 className='text-sm font-semibold text-slate-900'>Buildings</h2>
-            <span className='text-xs text-slate-400'>{houses.length} total</span>
+            <h2 className='text-sm font-semibold text-slate-900'>{isResident ? 'My apartment' : 'Buildings'}</h2>
+            <span className='text-xs text-slate-400'>{isResident ? 'Your unit' : `${houses.length} total`}</span>
           </div>
           <div className='space-y-3'>
-            {houses.map((house) => (
-              <div key={house.id} className='flex items-center gap-3 rounded-lg border border-slate-100 p-3'>
+            {isResident && myApartmentId && apartmentNumber ? (
+              <Link
+                href={`/workspace-shell/${myApartmentId}`}
+                className='flex items-center gap-3 rounded-lg border border-slate-100 p-3 transition-colors hover:bg-slate-50'
+              >
                 <div className='flex size-9 shrink-0 items-center justify-center rounded-lg bg-slate-100'>
                   <FiHome className='size-4 text-slate-500' />
                 </div>
                 <div className='min-w-0 flex-1'>
-                  <p className='truncate text-sm font-medium text-slate-900'>{house.name}</p>
-                  <p className='truncate text-xs text-slate-400'>{house.address}</p>
+                  <p className='truncate text-sm font-medium text-slate-900'>Apartment #{apartmentNumber}</p>
+                  <p className='truncate text-xs text-slate-400'>View full analytics</p>
                 </div>
                 <div className='text-right'>
-                  <p className='text-sm font-semibold text-slate-900'>{house.occupancy_rate}%</p>
-                  <p className='text-xs text-slate-400'>{house.units_count} units</p>
+                  <p className='text-sm font-semibold text-slate-900'>{apartmentScore ?? '—'}</p>
+                  <p className='text-xs text-slate-400'>Eco score</p>
                 </div>
-              </div>
-            ))}
+              </Link>
+            ) : (
+              houses.map((house) => (
+                <div key={house.id} className='flex items-center gap-3 rounded-lg border border-slate-100 p-3'>
+                  <div className='flex size-9 shrink-0 items-center justify-center rounded-lg bg-slate-100'>
+                    <FiHome className='size-4 text-slate-500' />
+                  </div>
+                  <div className='min-w-0 flex-1'>
+                    <p className='truncate text-sm font-medium text-slate-900'>{house.name}</p>
+                    <p className='truncate text-xs text-slate-400'>{house.address}</p>
+                  </div>
+                  <div className='text-right'>
+                    <p className='text-sm font-semibold text-slate-900'>{house.occupancy_rate}%</p>
+                    <p className='text-xs text-slate-400'>{house.units_count} units</p>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </article>
 
@@ -331,6 +398,7 @@ const DashboardPage = () => {
         </article>
       </div>
 
+      {!isResident && (
       <div className='mt-5 rounded-xl bg-white p-5 shadow-sm'>
         <div className='mb-3 flex items-center justify-between'>
           <h2 className='text-sm font-semibold text-slate-900'>Manager actions proof</h2>
@@ -368,6 +436,7 @@ const DashboardPage = () => {
           </div>
         )}
       </div>
+      )}
     </AppShell>
   )
 }

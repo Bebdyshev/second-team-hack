@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { FiCpu } from 'react-icons/fi'
 import {
@@ -86,7 +87,16 @@ const ContextZone = ({ label, summary, onAddContext, children }: ContextZoneProp
 }
 
 const ApartmentDetailPage = ({ params }: ApartmentDetailPageProps) => {
-  const { accessToken } = useAuth()
+  const { accessToken, user, activeRole } = useAuth()
+  const router = useRouter()
+
+  // Residents: only allow access to their own apartment
+  const isResidentForbidden = Boolean(user && activeRole === 'Resident' && user.apartment_id && params.apartmentId !== user.apartment_id)
+  useEffect(() => {
+    if (!isResidentForbidden) return
+    router.replace(`/workspace-shell/${user!.apartment_id!}`)
+  }, [isResidentForbidden, user, router])
+
   const [summary, setSummary] = useState<ApartmentSummaryResponse | null>(null)
   const [hourlyElectricity, setHourlyElectricity] = useState<number[]>([])
   const [hourlyWater, setHourlyWater] = useState<number[]>([])
@@ -102,6 +112,7 @@ const ApartmentDetailPage = ({ params }: ApartmentDetailPageProps) => {
   useEffect(() => {
     const loadApartment = async () => {
       if (!accessToken) return
+      if (isResidentForbidden) return
       setIsLoading(true)
       setError('')
       try {
@@ -129,7 +140,7 @@ const ApartmentDetailPage = ({ params }: ApartmentDetailPageProps) => {
       }
     }
     void loadApartment()
-  }, [accessToken, params.apartmentId])
+  }, [accessToken, params.apartmentId, isResidentForbidden])
 
   const apartment = summary?.apartment
   const liveSnapshot = summary?.live_snapshot
@@ -211,6 +222,16 @@ const ApartmentDetailPage = ({ params }: ApartmentDetailPageProps) => {
 
   const closeChat = () => {
     setChatOpen(false)
+  }
+
+  if (isResidentForbidden) {
+    return (
+      <AppShell title='Access restricted' subtitle='Redirecting to your apartment'>
+        <section className='mx-auto flex max-w-3xl items-center justify-center py-24'>
+          <p className='text-sm text-slate-500'>You can only view your own apartment. Redirecting…</p>
+        </section>
+      </AppShell>
+    )
   }
 
   if (!summary && !isLoading) {

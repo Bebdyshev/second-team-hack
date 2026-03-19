@@ -28,6 +28,7 @@ class UserProfile(BaseModel):
     full_name: str
     organizations: list[Organization]
     memberships: list[Membership]
+    apartment_id: str | None = None  # Resident's assigned apartment; empty for Manager
 
 
 class AuthResponse(BaseModel):
@@ -201,3 +202,58 @@ class UpdateTaskRequest(BaseModel):
     status: TaskStatus | None = None
     title: str | None = None
     description: str | None = None
+
+
+# ── Tickets ───────────────────────────────────────────────────────────────────
+TicketStatus = Literal["sent", "viewing", "decision"]
+
+
+class TicketAttachment(BaseModel):
+    name: str
+    url: str | None = None
+
+
+class TicketFollowUp(BaseModel):
+    id: str
+    text: str
+    author_id: str
+    author_name: str
+    author_role: str
+    created_at: datetime
+
+
+class Ticket(BaseModel):
+    id: str
+    house_id: str
+    resident_id: str
+    resident_name: str
+    resident_email: str
+    apartment_id: str
+    subject: str
+    description: str
+    incident_date: str
+    incident_time: str
+    attachments: list[TicketAttachment]
+    status: TicketStatus
+    follow_ups: list[TicketFollowUp]
+    created_at: datetime
+    updated_at: datetime
+    viewed_at: datetime | None = None
+    decision: str | None = None
+
+
+class TicketCreate(BaseModel):
+    subject: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    incident_date: str = Field(min_length=1)
+    incident_time: str = Field(min_length=1)
+    attachments: list[TicketAttachment] = []
+
+
+class TicketFollowUpCreate(BaseModel):
+    text: str = Field(min_length=1)
+
+
+class TicketUpdate(BaseModel):
+    status: TicketStatus | None = None
+    decision: str | None = None

@@ -18,7 +18,8 @@ uvicorn src.app:app --reload --port 8000
 ## Seed Users
 
 - Manager: `manager@resmonitor.kz` / `manager123`
-- Resident: `resident@resmonitor.kz` / `resident123`
+- Resident: `resident@resmonitor.kz` / `resident123` (apt-804)
+- Resident: `resident2@resmonitor.kz` / `resident123` (apt-502)
 
 ## Main Endpoints
 

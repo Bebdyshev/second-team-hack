@@ -79,8 +79,15 @@ const TrendLine = ({ points, color, unit }: { points: number[]; color: string; u
 
 const WorkspaceShellPage = () => {
   const router = useRouter()
-  const { accessToken, activeOrganizationId } = useAuth()
+  const { accessToken, activeOrganizationId, user, activeRole } = useAuth()
   const activeHouseId = activeOrganizationId ?? 'house-1'
+
+  // Residents: auto-redirect to their apartment (no apartment picker)
+  const isResidentRedirect = Boolean(user && accessToken && activeRole === 'Resident' && user.apartment_id)
+  useEffect(() => {
+    if (!isResidentRedirect) return
+    router.replace(`/workspace-shell/${user!.apartment_id!}`)
+  }, [isResidentRedirect, user, router])
 
   const [apartments, setApartments] = useState<ApartmentItem[]>([])
   const [summary, setSummary] = useState({ totalPower: 0, totalWater: 0, averageAir: 0, cityImpact: 0, powerSeries: [] as number[], waterSeries: [] as number[], co2Series: [] as number[] })
@@ -93,6 +100,7 @@ const WorkspaceShellPage = () => {
 
   const loadData = useCallback(async () => {
     if (!accessToken) return
+    if (activeRole === 'Resident' && user?.apartment_id) return
     setIsLoading(true)
     setError('')
     try {
@@ -129,7 +137,7 @@ const WorkspaceShellPage = () => {
     } finally {
       setIsLoading(false)
     }
-  }, [accessToken, activeHouseId])
+  }, [accessToken, activeHouseId, activeRole, user?.apartment_id])
 
   useEffect(() => {
     void loadData()
@@ -171,6 +179,16 @@ const WorkspaceShellPage = () => {
   }
 
   const handleEnterApartment = (apartmentId: string) => router.push(`/workspace-shell/${apartmentId}`)
+
+  if (isResidentRedirect) {
+    return (
+      <AppShell title='Building Digital Twin' subtitle='Opening your apartment'>
+        <section className='mx-auto flex max-w-7xl items-center justify-center py-24'>
+          <p className='text-sm text-slate-500'>Redirecting to your apartment…</p>
+        </section>
+      </AppShell>
+    )
+  }
 
   return (
     <AppShell title='Building Digital Twin' subtitle='Pick an apartment to open full analytics page'>

@@ -9,8 +9,8 @@ import {
   FiFileText,
   FiGrid,
   FiHome,
-  FiLayers,
   FiLogOut,
+  FiMessageCircle,
   FiSettings,
   FiTool,
   FiWifi,
@@ -22,17 +22,19 @@ type NavItem = {
   href: string
   label: string
   icon: React.ComponentType<{ className?: string }>
+  managerOnly?: boolean
 }
 
 const mainLinks: NavItem[] = [
   { href: '/dashboard', label: 'Overview', icon: FiGrid },
-  { href: '/workspace-shell', label: 'Buildings', icon: FiHome },
+  { href: '/workspace-shell', label: 'My Apartment', icon: FiHome },
   { href: '/tasks-board', label: 'Daily Tasks', icon: FiBarChart2 },
   { href: '/data-tables', label: 'Meters', icon: FiDatabase },
   { href: '/knowledge-base', label: 'Alerts', icon: FiAlertTriangle },
   { href: '/agents', label: 'Maintenance', icon: FiTool },
   { href: '/legal-assistant', label: 'Reports', icon: FiFileText },
-  { href: '/api-status', label: 'Integrations', icon: FiWifi },
+  { href: '/tickets', label: 'Tickets', icon: FiMessageCircle },
+  { href: '/api-status', label: 'Integrations', icon: FiWifi, managerOnly: true },
 ]
 
 type AppShellProps = {
@@ -73,7 +75,9 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
         <div className='flex-1 overflow-y-auto px-3 pb-4 scrollbar-hide'>
           <p className='mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-400'>Navigation</p>
           <nav className='space-y-0.5'>
-            {mainLinks.map((item) => {
+            {mainLinks
+              .filter((item) => !item.managerOnly || activeRole === 'Manager')
+              .map((item) => {
               const Icon = item.icon
               const isActive = pathname === item.href
               return (

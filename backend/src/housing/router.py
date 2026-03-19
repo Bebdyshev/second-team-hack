@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -36,6 +37,7 @@ from src.housing.db import get_housing_db
 from src.housing.security import get_current_user, issue_tokens_for_user, require_manager, verify_refresh_token_and_get_user
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _assert_house_access(user: dict[str, str], house_id: str) -> None:
@@ -436,6 +438,15 @@ def create_ticket(
         building_name=building_name,
     )
     complaint_type = task_data.get("complaint_type", "general") if task_data else "general"
+    classification_reason = (task_data or {}).get("classification_reason")
+    logger.info(
+        "ticket_classification_result resident_id=%s house_id=%s complaint_type=%s ai_used=%s reason=%r",
+        user["id"],
+        user["house_id"],
+        complaint_type,
+        bool(task_data),
+        classification_reason,
+    )
 
     ticket = store.create_ticket(
         house_id=user["house_id"],
@@ -468,6 +479,11 @@ def create_ticket(
             db=db,
         )
     else:
+        logger.warning(
+            "ticket_classification_fallback resident_id=%s house_id=%s complaint_type=general reason=groq_unavailable_or_parse_failed",
+            user["id"],
+            user["house_id"],
+        )
         # Fallback if Groq unavailable: create basic task from ticket
         store.create_task(
             title=payload.subject,

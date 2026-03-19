@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"net/http"
+	"sync"
+	"time"
 
 	"second-team-hack/backend-go/internal/auth"
 	"second-team-hack/backend-go/internal/store"
@@ -13,6 +15,9 @@ type Server struct {
 	tokens *auth.TokenService
 	web3   *web3.Client
 	mux    *http.ServeMux
+
+	proofRateMu    sync.Mutex
+	proofRateState map[string][]time.Time
 }
 
 func NewServer(dataStore *store.Store, tokenService *auth.TokenService, web3Client *web3.Client) *Server {
@@ -21,6 +26,8 @@ func NewServer(dataStore *store.Store, tokenService *auth.TokenService, web3Clie
 		tokens: tokenService,
 		web3:   web3Client,
 		mux:    http.NewServeMux(),
+
+		proofRateState: make(map[string][]time.Time),
 	}
 	server.routes()
 	return server

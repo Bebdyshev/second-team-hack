@@ -37,6 +37,10 @@ func (server *Server) handleAnchorReport(writer http.ResponseWriter, request *ht
 		writeError(writer, http.StatusForbidden, "only manager can anchor report")
 		return
 	}
+	if !server.allowProofWrite(user.ID, "anchor_report") {
+		writeError(writer, http.StatusTooManyRequests, "rate limit exceeded for report anchor")
+		return
+	}
 
 	houseID := request.PathValue("houseID")
 	if !canAccessHouse(user, houseID) {
@@ -149,6 +153,10 @@ func (server *Server) handleProveManagerAction(writer http.ResponseWriter, reque
 	}
 	if user.Role != domain.RoleManager {
 		writeError(writer, http.StatusForbidden, "only manager can prove manager actions")
+		return
+	}
+	if !server.allowProofWrite(user.ID, "manager_action_proof") {
+		writeError(writer, http.StatusTooManyRequests, "rate limit exceeded for manager action proof")
 		return
 	}
 

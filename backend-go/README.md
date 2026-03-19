@@ -18,7 +18,7 @@ Role restrictions implemented in API:
 ## Run
 
 ```bash
-cd backend-go
+cd backend
 go mod tidy
 go run ./cmd/api
 ```
@@ -83,6 +83,9 @@ Server runs on `:8000` by default.
 
 This MVP uses server-attested proofing:
 - Backend hashes report/action payload with `sha256`
-- Backend sends transaction to `ProofRegistry` in public testnet
+- Backend prepares and tracks proof transactions for `ProofRegistry`
 - Backend stores `status`, `tx_hash`, `block_number`, `explorer_url`
 - Duplicate report anchor requests with same `house_id + period + report_hash` are idempotent
+
+Current implementation runs in deferred mode without external Web3 dependency installation.
+You can plug in a full on-chain sender later by extending `internal/web3/client.go`.

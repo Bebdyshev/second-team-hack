@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: lms-postgres
+    environment:
+      POSTGRES_DB: lms_db
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    networks: 
+      - proxy
+
+  backend:
+    build: .
+    container_name: lms-backend
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_URL=${POSTGRES_URL}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - AZURE_OPENAI_DEPLOYMENT_NAME=${AZURE_OPENAI_DEPLOYMENT_NAME}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - RABBITMQ_EXCHANGE=${RABBITMQ_EXCHANGE}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_ADMIN_CHAT_IDS=${TELEGRAM_ADMIN_CHAT_IDS}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - MASTEREDU_API_KEY=${MASTEREDU_API_KEY}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - RESEND_MAIL_DOMAIN=${RESEND_MAIL_DOMAIN}
+      - EMAIL_SENDER=${EMAIL_SENDER}
+      - EMAIL_SENDER_NAME=${EMAIL_SENDER_NAME}
+      - LMS_URL=${LMS_URL}
+      - SENDER_NAME=${SENDER_NAME}
+      - DISABLE_SCHEDULER=true
+      - VIRTUAL_HOST=lmsapi.mastereducation.kz
+      - LETSENCRYPT_HOST=lmsapi.mastereducation.kz
+      - VIRTUAL_PORT=8000
+      - CLIENT_MAX_BODY_SIZE=50m
+    depends_on:
+      - postgres
+    networks:
+      - proxy
+    restart: unless-stopped
+    volumes:
+      - ./uploads:/app/uploads
+      - ./scripts:/app/scripts:ro
+    expose:
+      - "8000"
+
+  scheduler:
+    build: .
+    container_name: lms-scheduler
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_URL=${POSTGRES_URL}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - EMAIL_SENDER=${EMAIL_SENDER}
+      - EMAIL_SENDER_NAME=${EMAIL_SENDER_NAME}
+      - LMS_URL=${LMS_URL}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - RABBITMQ_EXCHANGE=${RABBITMQ_EXCHANGE}
+    command: python -m src.services.run_scheduler
+    depends_on:
+      - postgres
+      - backend
+    networks:
+      - proxy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  proxy:
+    external: true

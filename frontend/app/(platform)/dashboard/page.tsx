@@ -11,8 +11,11 @@ import {
   FiWind,
   FiZap,
 } from 'react-icons/fi'
+import { useEffect, useState } from 'react'
 
 import { AppShell } from '@/components/app-shell'
+import { useAuth } from '@/context/auth-context'
+import { apiRequest, ApiError } from '@/lib/api'
 import { formatPercent, houses, resourceAlerts, resourceKpis } from '@/lib/boilerplate-data'
 import type { ResourceKey } from '@/lib/boilerplate-data'
 
@@ -36,10 +39,40 @@ const severityBadge: Record<'low' | 'medium' | 'high', string> = {
   high: 'bg-rose-100 text-rose-700',
 }
 
+type ManagerActionProof = {
+  id: string
+  action_type: string
+  status: 'pending' | 'confirmed' | 'failed'
+  tx_hash: string
+  explorer_url: string
+  created_at: string
+}
+
 const DashboardPage = () => {
+  const { accessToken, activeOrganizationId } = useAuth()
   const totalUnits = houses.reduce((acc, house) => acc + house.unitsCount, 0)
   const averageOccupancy = Math.round(houses.reduce((acc, house) => acc + house.occupancyRate, 0) / houses.length)
   const highAlerts = resourceAlerts.filter((a) => a.severity === 'high').length
+  const [proofs, setProofs] = useState<ManagerActionProof[]>([])
+  const [proofError, setProofError] = useState('')
+  const activeHouseId = activeOrganizationId ?? 'house-1'
+
+  useEffect(() => {
+    const loadProofs = async () => {
+      if (!accessToken) return
+      setProofError('')
+      try {
+        const response = await apiRequest<ManagerActionProof[]>(`/manager-actions/proofs?house_id=${activeHouseId}`, {
+          token: accessToken,
+        })
+        setProofs(response)
+      } catch (requestError) {
+        const message = requestError instanceof ApiError ? requestError.message : 'Failed to load manager proofs'
+        setProofError(message)
+      }
+    }
+    void loadProofs()
+  }, [accessToken, activeHouseId])
 
   return (
     <AppShell title='Overview' subtitle='Real-time resource monitoring across all buildings'>
@@ -191,6 +224,44 @@ const DashboardPage = () => {
             {highAlerts} alert{highAlerts !== 1 ? 's' : ''} need immediate attention
           </div>
         </article>
+      </div>
+
+      <div className='mt-5 rounded-xl bg-white p-5 shadow-sm'>
+        <div className='mb-3 flex items-center justify-between'>
+          <h2 className='text-sm font-semibold text-slate-900'>Manager actions proof</h2>
+          <span className='text-xs text-slate-400'>{proofs.length} logged</span>
+        </div>
+        {proofError ? (
+          <p className='text-xs text-rose-600'>{proofError}</p>
+        ) : proofs.length == 0 ? (
+          <p className='text-xs text-slate-500'>No proved actions yet</p>
+        ) : (
+          <div className='grid gap-2 md:grid-cols-2'>
+            {proofs.slice(0, 4).map((proof) => (
+              <article key={proof.id} className='rounded-md border border-slate-200 p-3'>
+                <div className='flex items-center justify-between'>
+                  <p className='text-xs font-medium text-slate-800'>{proof.action_type}</p>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                      proof.status == 'confirmed'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : proof.status == 'pending'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-rose-100 text-rose-700'
+                    }`}
+                  >
+                    {proof.status == 'confirmed' ? 'Verified on-chain' : proof.status}
+                  </span>
+                </div>
+                {proof.explorer_url && (
+                  <a href={proof.explorer_url} target='_blank' rel='noreferrer' className='mt-1 inline-block text-[11px] text-blue-600 underline'>
+                    tx {proof.tx_hash.slice(0, 12)}...
+                  </a>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
       </div>
     </AppShell>
   )

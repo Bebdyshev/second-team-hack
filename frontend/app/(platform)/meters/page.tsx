@@ -171,45 +171,6 @@ const DataTablesPage = () => {
         </div>
       )}
 
-      <div className='mt-5 overflow-hidden rounded-lg border border-slate-200'>
-        <table className='w-full border-collapse text-left text-sm'>
-          <thead className='bg-slate-50 text-xs uppercase tracking-wide text-slate-500'>
-            <tr>
-              <th className='px-4 py-3'>Meter</th>
-              <th className='px-4 py-3'>House</th>
-              <th className='px-4 py-3'>Resource</th>
-              <th className='px-4 py-3'>Signal</th>
-              <th className='px-4 py-3'>Last Sync</th>
-            </tr>
-          </thead>
-          <tbody className='divide-y divide-slate-100 bg-white'>
-            {loading ? (
-              <tr>
-                <td className='px-4 py-5 text-slate-400' colSpan={5}>Loading meters...</td>
-              </tr>
-            ) : meters.length === 0 ? (
-              <tr>
-                <td className='px-4 py-5 text-slate-400' colSpan={5}>No meters found.</td>
-              </tr>
-            ) : (
-              meters.map((meter) => (
-                <tr key={meter.id}>
-                  <td className='px-4 py-3 font-medium text-slate-900'>{meter.id}</td>
-                  <td className='px-4 py-3 text-slate-700'>{meter.house_name}</td>
-                  <td className='px-4 py-3 text-slate-700'>{meter.resource}</td>
-                  <td className='px-4 py-3'>
-                    <span className={`rounded-full border px-2 py-1 text-xs ${signalTone[meter.signal_strength]}`}>
-                      {meter.signal_strength}
-                    </span>
-                  </td>
-                  <td className='px-4 py-3 text-slate-500'>{meter.last_sync}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
       <div className='mt-5 rounded-lg border border-slate-200 bg-white'>
         <div className='flex items-center justify-between border-b border-slate-100 px-4 py-3'>
           <div className='flex items-center gap-2'>

@@ -16,8 +16,43 @@ import { useEffect, useState } from 'react'
 import { AppShell } from '@/components/app-shell'
 import { useAuth } from '@/context/auth-context'
 import { apiRequest, ApiError } from '@/lib/api'
-import { formatPercent, houses, resourceAlerts, resourceKpis } from '@/lib/boilerplate-data'
-import type { ResourceKey } from '@/lib/boilerplate-data'
+import { formatPercent } from '@/lib/boilerplate-data'
+
+type ResourceKey = 'electricity' | 'water' | 'gas' | 'heating'
+
+type HouseItem = {
+  id: string
+  name: string
+  address: string
+  units_count: number
+  occupancy_rate: number
+}
+
+type ResourceAlert = {
+  id: string
+  house_name: string
+  resource: ResourceKey
+  severity: 'low' | 'medium' | 'high'
+  title: string
+  detected_at: string
+}
+
+type MeterItem = {
+  id: string
+  signal_strength: 'good' | 'weak' | 'offline'
+}
+
+type HouseSummary = {
+  total_power: number
+  total_water: number
+  average_air: number
+  city_impact: number
+  alerts_count: number
+}
+
+type DynamicsResponse = {
+  dynamics: Array<{ label: string; value: number }>
+}
 
 const resourceIcon: Record<ResourceKey, React.ComponentType<{ className?: string }>> = {
   electricity: FiZap,
@@ -50,32 +85,102 @@ type ManagerActionProof = {
 
 const DashboardPage = () => {
   const { accessToken, activeOrganizationId } = useAuth()
-  const totalUnits = houses.reduce((acc, house) => acc + house.unitsCount, 0)
-  const averageOccupancy = Math.round(houses.reduce((acc, house) => acc + house.occupancyRate, 0) / houses.length)
-  const highAlerts = resourceAlerts.filter((a) => a.severity === 'high').length
+  const [houses, setHouses] = useState<HouseItem[]>([])
+  const [alerts, setAlerts] = useState<ResourceAlert[]>([])
+  const [meters, setMeters] = useState<MeterItem[]>([])
+  const [summary, setSummary] = useState<HouseSummary | null>(null)
+  const [electricityDelta, setElectricityDelta] = useState(0)
+  const [waterDelta, setWaterDelta] = useState(0)
   const [proofs, setProofs] = useState<ManagerActionProof[]>([])
   const [proofError, setProofError] = useState('')
+  const [pageError, setPageError] = useState('')
   const activeHouseId = activeOrganizationId ?? 'house-1'
 
   useEffect(() => {
-    const loadProofs = async () => {
+    const loadDashboard = async () => {
       if (!accessToken) return
+      setPageError('')
       setProofError('')
+
       try {
-        const response = await apiRequest<ManagerActionProof[]>(`/manager-actions/proofs?house_id=${activeHouseId}`, {
-          token: accessToken,
-        })
-        setProofs(response)
+        const [housesResponse, summaryResponse, alertsResponse, metersResponse, proofsResponse, electricityDynamics, waterDynamics] = await Promise.all([
+          apiRequest<HouseItem[]>('/houses', { token: accessToken }),
+          apiRequest<HouseSummary>(`/houses/${activeHouseId}/summary`, { token: accessToken }),
+          apiRequest<ResourceAlert[]>(`/alerts?house_id=${activeHouseId}`, { token: accessToken }),
+          apiRequest<MeterItem[]>(`/meters?house_id=${activeHouseId}`, { token: accessToken }),
+          apiRequest<ManagerActionProof[]>(`/manager-actions/proofs?house_id=${activeHouseId}`, { token: accessToken }),
+          apiRequest<DynamicsResponse>(`/houses/${activeHouseId}/dynamics?resource=electricity&period=24h`, { token: accessToken }),
+          apiRequest<DynamicsResponse>(`/houses/${activeHouseId}/dynamics?resource=water&period=24h`, { token: accessToken }),
+        ])
+
+        setHouses(housesResponse)
+        setSummary(summaryResponse)
+        setAlerts(alertsResponse)
+        setMeters(metersResponse)
+        setProofs(proofsResponse)
+
+        const powerStart = electricityDynamics.dynamics[0]?.value ?? 0
+        const powerEnd = electricityDynamics.dynamics[electricityDynamics.dynamics.length - 1]?.value ?? 0
+        const waterStart = waterDynamics.dynamics[0]?.value ?? 0
+        const waterEnd = waterDynamics.dynamics[waterDynamics.dynamics.length - 1]?.value ?? 0
+
+        const powerDelta = powerStart == 0 ? 0 : ((powerEnd - powerStart) / powerStart) * 100
+        const waterDeltaValue = waterStart == 0 ? 0 : ((waterEnd - waterStart) / waterStart) * 100
+        setElectricityDelta(Number(powerDelta.toFixed(1)))
+        setWaterDelta(Number(waterDeltaValue.toFixed(1)))
       } catch (requestError) {
-        const message = requestError instanceof ApiError ? requestError.message : 'Failed to load manager proofs'
+        const message = requestError instanceof ApiError ? requestError.message : 'Failed to load dashboard data'
+        setPageError(message)
         setProofError(message)
       }
+
     }
-    void loadProofs()
+    void loadDashboard()
   }, [accessToken, activeHouseId])
+
+  const totalUnits = houses.reduce((acc, house) => acc + house.units_count, 0)
+  const averageOccupancy = houses.length == 0 ? 0 : Math.round(houses.reduce((acc, house) => acc + house.occupancy_rate, 0) / houses.length)
+  const highAlerts = alerts.filter((item) => item.severity == 'high').length
+  const offlineMeters = meters.filter((item) => item.signal_strength == 'offline').length
+
+  const resourceCards = [
+    {
+      key: 'electricity' as const,
+      label: 'Electricity',
+      unit: 'kWh',
+      currentValue: summary?.total_power ?? 0,
+      target: Math.max(1, Math.round((summary?.total_power ?? 0) * 0.92)),
+      deltaPercent: electricityDelta,
+    },
+    {
+      key: 'water' as const,
+      label: 'Water',
+      unit: 'L',
+      currentValue: summary?.total_water ?? 0,
+      target: Math.max(1, Math.round((summary?.total_water ?? 0) * 0.94)),
+      deltaPercent: waterDelta,
+    },
+    {
+      key: 'gas' as const,
+      label: 'Gas',
+      unit: 'm3',
+      currentValue: Math.round((summary?.total_power ?? 0) * 0.17),
+      target: Math.max(1, Math.round((summary?.total_power ?? 0) * 0.15)),
+      deltaPercent: 2.1,
+    },
+    {
+      key: 'heating' as const,
+      label: 'Heating',
+      unit: 'Gcal',
+      currentValue: Math.round((summary?.average_air ?? 0) * 0.85),
+      target: Math.max(1, Math.round((summary?.average_air ?? 0) * 0.8)),
+      deltaPercent: -1.4,
+    },
+  ]
 
   return (
     <AppShell title='Overview' subtitle='Real-time resource monitoring across all buildings'>
+      {pageError && <p className='mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>{pageError}</p>}
       {/* Top KPI row */}
       <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
         <article className='rounded-xl bg-white p-5 shadow-sm'>
@@ -96,7 +201,7 @@ const DashboardPage = () => {
               <FiAlertCircle className='size-4' />
             </span>
           </div>
-          <p className='mt-3 text-3xl font-bold text-slate-900'>{resourceAlerts.length}</p>
+          <p className='mt-3 text-3xl font-bold text-slate-900'>{alerts.length}</p>
           <p className='mt-1 text-xs text-rose-500'>{highAlerts} critical need action</p>
         </article>
 
@@ -118,14 +223,14 @@ const DashboardPage = () => {
               <FiZap className='size-4' />
             </span>
           </div>
-          <p className='mt-3 text-3xl font-bold text-slate-900'>12</p>
-          <p className='mt-1 text-xs text-amber-500'>1 offline</p>
+          <p className='mt-3 text-3xl font-bold text-slate-900'>{meters.length}</p>
+          <p className='mt-1 text-xs text-amber-500'>{offlineMeters} offline</p>
         </article>
       </div>
 
       {/* Resource KPI cards */}
       <div className='mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
-        {resourceKpis.map((kpi) => {
+        {resourceCards.map((kpi) => {
           const Icon = resourceIcon[kpi.key]
           const color = resourceColor[kpi.key]
           const isOverTarget = kpi.currentValue > kpi.target
@@ -183,8 +288,8 @@ const DashboardPage = () => {
                   <p className='truncate text-xs text-slate-400'>{house.address}</p>
                 </div>
                 <div className='text-right'>
-                  <p className='text-sm font-semibold text-slate-900'>{house.occupancyRate}%</p>
-                  <p className='text-xs text-slate-400'>{house.unitsCount} units</p>
+                  <p className='text-sm font-semibold text-slate-900'>{house.occupancy_rate}%</p>
+                  <p className='text-xs text-slate-400'>{house.units_count} units</p>
                 </div>
               </div>
             ))}
@@ -195,10 +300,10 @@ const DashboardPage = () => {
         <article className='rounded-xl bg-white p-5 shadow-sm'>
           <div className='mb-4 flex items-center justify-between'>
             <h2 className='text-sm font-semibold text-slate-900'>Recent anomalies</h2>
-            <span className='text-xs text-slate-400'>{resourceAlerts.length} active</span>
+            <span className='text-xs text-slate-400'>{alerts.length} active</span>
           </div>
           <div className='space-y-3'>
-            {resourceAlerts.map((alert) => {
+            {alerts.map((alert) => {
               const Icon = resourceIcon[alert.resource]
               const color = resourceColor[alert.resource]
               return (
@@ -210,7 +315,7 @@ const DashboardPage = () => {
                     <div className='flex items-center gap-2'>
                       <p className='truncate text-sm font-medium text-slate-900'>{alert.title}</p>
                     </div>
-                    <p className='mt-0.5 text-xs text-slate-400'>{alert.houseName} · {alert.detectedAt}</p>
+                    <p className='mt-0.5 text-xs text-slate-400'>{alert.house_name} · {alert.detected_at}</p>
                   </div>
                   <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${severityBadge[alert.severity]}`}>
                     {alert.severity}

@@ -1,8 +1,12 @@
 'use client'
 
 import Link from 'next/link'
+<<<<<<< HEAD
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FiCpu } from 'react-icons/fi'
+=======
+import { useEffect, useMemo, useState } from 'react'
+>>>>>>> b17ba8f (feat: enhance dashboard and apartment detail pages with new data fetching and state management)
 import {
   Bar,
   BarChart,
@@ -18,12 +22,14 @@ import {
 
 import { ApartmentChatbot, type ContextItem } from '@/components/apartment-chatbot'
 import { AppShell } from '@/components/app-shell'
-import { HOURS, getApartmentById } from '@/lib/apartment-sim'
+import { useAuth } from '@/context/auth-context'
+import { apiRequest, ApiError } from '@/lib/api'
 
 type ApartmentDetailPageProps = {
   params: { apartmentId: string }
 }
 
+<<<<<<< HEAD
 // ── Context zone wrapper ──────────────────────────────────────────────────────
 const ContextZone = ({
   label,
@@ -128,10 +134,100 @@ const ApartmentDetailPage = ({ params }: ApartmentDetailPageProps) => {
   const addedLabels = useMemo(() => new Set(contextItems.map((c) => c.label)), [contextItems])
 
   if (!apartment) {
+=======
+type ApartmentSummaryResponse = {
+  apartment: {
+    id: string
+    number: string
+    score: number
+    status: 'good' | 'watch' | 'alert'
+  }
+  live_snapshot: {
+    electricity: number
+    water: number
+    co2: number
+    humidity: number
+    savings: number
+  }
+}
+
+type DynamicsResponse = {
+  dynamics: Array<{ label: string; value: number }>
+}
+
+const ApartmentDetailPage = ({ params }: ApartmentDetailPageProps) => {
+  const { accessToken } = useAuth()
+  const [summary, setSummary] = useState<ApartmentSummaryResponse | null>(null)
+  const [hourlyElectricity, setHourlyElectricity] = useState<number[]>([])
+  const [hourlyWater, setHourlyWater] = useState<number[]>([])
+  const [hourlyCo2, setHourlyCo2] = useState<number[]>([])
+  const [hourlyHumidity, setHourlyHumidity] = useState<number[]>([])
+  const [monthlyElectricity, setMonthlyElectricity] = useState<number[]>([])
+  const [monthlyWater, setMonthlyWater] = useState<number[]>([])
+  const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+
+  useEffect(() => {
+    const loadApartment = async () => {
+      if (!accessToken) return
+      setIsLoading(true)
+      setError('')
+      try {
+        const [summaryResponse, electricity24h, water24h, co224h, humidity24h, electricity30d, water30d] = await Promise.all([
+          apiRequest<ApartmentSummaryResponse>(`/apartments/${params.apartmentId}/summary`, { token: accessToken }),
+          apiRequest<DynamicsResponse>(`/apartments/${params.apartmentId}/dynamics?resource=electricity&period=24h`, { token: accessToken }),
+          apiRequest<DynamicsResponse>(`/apartments/${params.apartmentId}/dynamics?resource=water&period=24h`, { token: accessToken }),
+          apiRequest<DynamicsResponse>(`/apartments/${params.apartmentId}/dynamics?resource=co2&period=24h`, { token: accessToken }),
+          apiRequest<DynamicsResponse>(`/apartments/${params.apartmentId}/dynamics?resource=humidity&period=24h`, { token: accessToken }),
+          apiRequest<DynamicsResponse>(`/apartments/${params.apartmentId}/dynamics?resource=electricity&period=30d`, { token: accessToken }),
+          apiRequest<DynamicsResponse>(`/apartments/${params.apartmentId}/dynamics?resource=water&period=30d`, { token: accessToken }),
+        ])
+        setSummary(summaryResponse)
+        setHourlyElectricity(electricity24h.dynamics.map((item) => item.value))
+        setHourlyWater(water24h.dynamics.map((item) => item.value))
+        setHourlyCo2(co224h.dynamics.map((item) => item.value))
+        setHourlyHumidity(humidity24h.dynamics.map((item) => item.value))
+        setMonthlyElectricity(electricity30d.dynamics.map((item) => item.value))
+        setMonthlyWater(water30d.dynamics.map((item) => item.value))
+      } catch (requestError) {
+        const message = requestError instanceof ApiError ? requestError.message : 'Failed to load apartment analytics'
+        setError(message)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    void loadApartment()
+  }, [accessToken, params.apartmentId])
+
+  const apartment = summary?.apartment
+  const liveSnapshot = summary?.live_snapshot
+  const hourlyChartData = useMemo(() => Array.from({ length: 24 }, (_, index) => ({
+    hour: `${String(index).padStart(2, '0')}:00`,
+    electricity: Number((hourlyElectricity[index] ?? 0).toFixed(2)),
+    water: Math.round(hourlyWater[index] ?? 0),
+    co2: Math.round(hourlyCo2[index] ?? 0),
+    humidity: Math.round(hourlyHumidity[index] ?? 0),
+  })), [hourlyElectricity, hourlyWater, hourlyCo2, hourlyHumidity])
+  const monthlyChartData = useMemo(() => Array.from({ length: 30 }, (_, index) => ({
+    day: index + 1,
+    electricity: monthlyElectricity[index] ?? 0,
+    water: monthlyWater[index] ?? 0,
+  }))
+  , [monthlyElectricity, monthlyWater])
+
+  const statusClass =
+    apartment?.status === 'good'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      : apartment?.status === 'watch'
+        ? 'border-amber-200 bg-amber-50 text-amber-700'
+        : 'border-rose-200 bg-rose-50 text-rose-700'
+
+  if (!summary && !isLoading) {
+>>>>>>> b17ba8f (feat: enhance dashboard and apartment detail pages with new data fetching and state management)
     return (
       <AppShell title='Apartment not found' subtitle='Invalid apartment id'>
         <section className='mx-auto w-full max-w-3xl rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm'>
-          <p className='text-sm text-slate-600'>Cannot open apartment analytics for this id.</p>
+          <p className='text-sm text-slate-600'>{error || 'Cannot open apartment analytics for this id.'}</p>
           <Link
             href='/workspace-shell'
             className='mt-4 inline-flex rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'
@@ -143,6 +239,7 @@ const ApartmentDetailPage = ({ params }: ApartmentDetailPageProps) => {
     )
   }
 
+<<<<<<< HEAD
   const liveHour = new Date().getHours() % 24
 
   const hourlyChartData = HOURS.map((hour, index) => ({
@@ -258,6 +355,15 @@ const ApartmentDetailPage = ({ params }: ApartmentDetailPageProps) => {
 
       <section className='mx-auto w-full max-w-4xl space-y-4 pb-20'>
         {/* Back + status */}
+=======
+  return (
+    <AppShell
+      title={`Apartment ${apartment?.number ?? params.apartmentId}`}
+      subtitle='Detailed analytics and trends'
+    >
+      <section className='mx-auto w-full max-w-6xl space-y-5'>
+        {isLoading && <p className='rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600'>Loading apartment analytics...</p>}
+>>>>>>> b17ba8f (feat: enhance dashboard and apartment detail pages with new data fetching and state management)
         <div className='flex items-center justify-between'>
           <Link
             href='/workspace-shell'
@@ -265,6 +371,7 @@ const ApartmentDetailPage = ({ params }: ApartmentDetailPageProps) => {
           >
             ← Back to apartments
           </Link>
+<<<<<<< HEAD
           <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${statusClass}`}>
             Eco Score {apartment.score}
           </span>
@@ -294,6 +401,36 @@ const ApartmentDetailPage = ({ params }: ApartmentDetailPageProps) => {
             </div>
           </article>
         </ContextZone>
+=======
+          <span className={`rounded-full border px-2 py-1 text-xs font-medium ${statusClass}`}>
+            Eco {apartment?.score ?? 0}
+          </span>
+        </div>
+
+        <article className='rounded-xl border border-slate-200 bg-white p-4 shadow-sm'>
+          <h2 className='text-sm font-semibold text-slate-900'>Live snapshot</h2>
+          <div className='mt-3 grid gap-3 sm:grid-cols-4'>
+            <div className='rounded-lg bg-slate-50 p-3'>
+              <p className='text-xs text-slate-500'>Electricity</p>
+              <p className='text-sm font-semibold text-slate-900'>{(liveSnapshot?.electricity ?? 0).toFixed(1)} kWh</p>
+            </div>
+            <div className='rounded-lg bg-slate-50 p-3'>
+              <p className='text-xs text-slate-500'>Water</p>
+              <p className='text-sm font-semibold text-slate-900'>{Math.round(liveSnapshot?.water ?? 0)} L</p>
+            </div>
+            <div className='rounded-lg bg-slate-50 p-3'>
+              <p className='text-xs text-slate-500'>Air</p>
+              <p className='text-sm font-semibold text-slate-900'>
+                {Math.round(liveSnapshot?.co2 ?? 0)} ppm / {Math.round(liveSnapshot?.humidity ?? 0)}%
+              </p>
+            </div>
+            <div className='rounded-lg bg-slate-50 p-3'>
+              <p className='text-xs text-slate-500'>Projected savings</p>
+              <p className='text-sm font-semibold text-emerald-700'>{liveSnapshot?.savings ?? 0}%</p>
+            </div>
+          </div>
+        </article>
+>>>>>>> b17ba8f (feat: enhance dashboard and apartment detail pages with new data fetching and state management)
 
         {/* Anomalies + recommendations */}
         {(apartment.anomalies.length > 0 || apartment.recommendations.length > 0) && (

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { AppShell } from '@/components/app-shell'
 import { useAuth } from '@/context/auth-context'
@@ -30,7 +30,7 @@ const LegalAssistantPage = () => {
 
   const latestPeriod = useMemo(() => monthlyReports[monthlyReports.length - 1]?.period ?? new Date().toISOString().slice(0, 7), [])
 
-  const loadAnchors = async () => {
+  const loadAnchors = useCallback(async () => {
     if (!accessToken) return
     setIsLoading(true)
     setError('')
@@ -45,7 +45,7 @@ const LegalAssistantPage = () => {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [accessToken, activeHouseId])
 
   const handleAnchorLatestReport = async () => {
     if (!accessToken) return
@@ -68,7 +68,7 @@ const LegalAssistantPage = () => {
 
   useEffect(() => {
     void loadAnchors()
-  }, [accessToken, activeHouseId])
+  }, [loadAnchors])
 
   return (
     <AppShell title='Monthly Reports'>

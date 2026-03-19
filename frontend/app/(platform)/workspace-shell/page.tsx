@@ -171,6 +171,12 @@ const WorkspaceShellPage = () => {
     return Object.entries(map).sort(([a], [b]) => Number(b) - Number(a)).map(([floor, apts]) => ({ floor: Number(floor), apts }))
   }, [apartmentOptions])
 
+  const buildingLayout = useMemo(() => {
+    const maxApts = floorGroups.length ? Math.max(...floorGroups.map((g) => g.apts.length)) : 1
+    const width = Math.max(480, maxApts * 96 + 80)
+    return { buildingWidth: width, roofHalfWidth: width / 2 + 24 }
+  }, [floorGroups])
+
   const handleReset = () => {
     setSelectedFloor('all')
     setSearchValue('')
@@ -281,28 +287,52 @@ const WorkspaceShellPage = () => {
           {apartmentOptions.length == 0 ? (
             <div className='rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500'>No apartments found for current filters</div>
           ) : (
-            <div className='space-y-3'>
-              {floorGroups.map(({ floor, apts }) => (
-                <div key={floor} className='flex items-center justify-center gap-3'>
-                  <div className='w-14 shrink-0 text-right'><span className='rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500'>F {floor}</span></div>
-                  <div className='flex flex-1 justify-center gap-2 overflow-x-auto overflow-y-visible py-1'>
-                    {apts.map((apartment) => {
-                      const statusRing = apartment.status == 'good' ? 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100' : apartment.status == 'watch' ? 'border-amber-300 bg-amber-50 hover:bg-amber-100' : 'border-rose-300 bg-rose-50 hover:bg-rose-100'
-                      const dotColor = apartment.status == 'good' ? 'bg-emerald-500' : apartment.status == 'watch' ? 'bg-amber-400' : 'bg-rose-500'
-                      return (
-                        <button key={apartment.id} type='button' onClick={() => handleEnterApartment(apartment.id)} className={`flex min-w-[88px] shrink-0 flex-col rounded-lg border px-3 py-2 text-left transition-all hover:shadow-sm ${statusRing}`}>
-                          <div className='flex items-center justify-between gap-1'>
-                            <p className='text-xs font-bold text-slate-800'>#{apartment.number}</p>
-                            <span className={`size-2 shrink-0 rounded-full ${dotColor}`} />
-                          </div>
-                          <p className='mt-0.5 text-[10px] text-slate-500'>Score {apartment.score}</p>
-                          {apartment.anomalies.length > 0 && <p className='mt-0.5 text-[9px] font-medium text-rose-600'>{apartment.anomalies.length} alert{apartment.anomalies.length > 1 ? 's' : ''}</p>}
-                        </button>
-                      )
-                    })}
+            <div className='flex flex-col items-center'>
+              {/* Roof — крыша домика */}
+              <div
+                className='border-b-[36px] border-b-amber-300 border-l-transparent border-r-transparent'
+                style={{
+                  width: 0,
+                  height: 0,
+                  borderLeftWidth: buildingLayout.roofHalfWidth,
+                  borderRightWidth: buildingLayout.roofHalfWidth,
+                }}
+                aria-hidden
+              />
+              {/* Building body — этажи с квартирами */}
+              <div
+                className='flex flex-col gap-1 rounded-b-xl border-x-2 border-b-2 border-slate-300 bg-slate-100/70 pb-4 pt-2 shadow-inner'
+                style={{ width: buildingLayout.buildingWidth }}
+              >
+                {floorGroups.map(({ floor, apts }) => (
+                  <div key={floor} className='flex items-stretch justify-center gap-1 px-3 py-1.5'>
+                    <span className='flex w-10 shrink-0 items-center justify-end pr-2 text-xs font-semibold text-slate-500'>F{floor}</span>
+                    <div className='flex flex-1 justify-center gap-1.5'>
+                      {apts.map((apartment) => {
+                        const statusStyle = apartment.status == 'good' ? 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100' : apartment.status == 'watch' ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-rose-50 border-rose-200 hover:bg-rose-100'
+                        const dotColor = apartment.status == 'good' ? 'bg-emerald-500' : apartment.status == 'watch' ? 'bg-amber-400' : 'bg-rose-500'
+                        return (
+                          <button
+                            key={apartment.id}
+                            type='button'
+                            onClick={() => handleEnterApartment(apartment.id)}
+                            className={`flex min-w-[80px] flex-1 max-w-[110px] flex-col items-center justify-center rounded border-2 px-3 py-2.5 transition-all hover:shadow-md ${statusStyle}`}
+                          >
+                            <div className='flex w-full items-center justify-between'>
+                              <span className='text-xs font-bold text-slate-800'>{apartment.number}</span>
+                              <span className={`size-2 shrink-0 rounded-full ${dotColor}`} />
+                            </div>
+                            <span className='mt-1 text-[10px] text-slate-500'>{apartment.score}</span>
+                            {apartment.anomalies.length > 0 && (
+                              <span className='mt-0.5 text-[9px] font-medium text-rose-600'>{apartment.anomalies.length} alert{apartment.anomalies.length > 1 ? 's' : ''}</span>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </article>

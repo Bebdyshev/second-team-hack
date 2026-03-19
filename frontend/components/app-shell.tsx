@@ -34,7 +34,7 @@ const mainLinks: NavItem[] = [
   { href: '/maintenance', label: 'Maintenance', icon: FiActivity },
   { href: '/reports', label: 'Reports', icon: FiTrendingUp },
   { href: '/tickets', label: 'Tickets', icon: FiMessageCircle, residentOnly: true },
-  { href: '/api-status', label: 'Integrations', icon: FiWifi, managerOnly: true },
+  // { href: '/api-status', label: 'Integrations', icon: FiWifi, managerOnly: true },
 ]
 
 type AppShellProps = {

@@ -34,6 +34,9 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "extra": {
+      "groqApiKey": "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"
+    },
     "plugins": [
       [
         "expo-image-picker",

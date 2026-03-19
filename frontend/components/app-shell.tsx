@@ -43,8 +43,8 @@ export const AppShell = ({ title, subtitle, children }: AppShellProps) => {
   const pathname = usePathname()
 
   return (
-    <main className='flex min-h-screen bg-[#f0f2f5]'>
-      <aside className='flex min-h-screen w-60 shrink-0 flex-col border-r border-slate-200 bg-white'>
+    <main className='flex min-h-screen items-start bg-[#f0f2f5]'>
+      <aside className='sticky top-0 flex h-screen w-60 shrink-0 self-start flex-col border-r border-slate-200 bg-white'>
         {/* Logo */}
         <div className='flex items-center gap-3 px-5 py-5'>
           <div className='flex size-8 items-center justify-center rounded-lg bg-blue-100'>

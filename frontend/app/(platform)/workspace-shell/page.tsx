@@ -16,6 +16,51 @@ import {
 } from '@/components/ui/select'
 import { FLOORS, applyEcoMode, buildDataset, tickApartments } from '@/lib/apartment-sim'
 
+const TrendLine = ({ points, color, unit }: { points: number[]; color: string; unit: string }) => {
+  if (points.length === 0) return null
+
+  const width = 260
+  const height = 76
+  const maxPoint = Math.max(...points)
+  const minPoint = Math.min(...points)
+  const range = maxPoint - minPoint || 1
+
+  const polyline = points
+    .map((point, index) => {
+      const x = (index / (points.length - 1 || 1)) * width
+      const y = height - ((point - minPoint) / range) * (height - 8) - 4
+      return `${x},${y}`
+    })
+    .join(' ')
+
+  const delta = ((points[points.length - 1] - points[0]) / (points[0] || 1)) * 100
+  const isUp = delta >= 0
+
+  return (
+    <div className='rounded-lg border border-slate-200 bg-white p-3'>
+      <svg viewBox={`0 0 ${width} ${height}`} className='h-[76px] w-full'>
+        <polyline
+          fill='none'
+          stroke={color}
+          strokeWidth='2.5'
+          strokeLinecap='round'
+          strokeLinejoin='round'
+          points={polyline}
+        />
+      </svg>
+      <div className='mt-2 flex items-center justify-between text-xs'>
+        <span className='text-slate-500'>
+          {Math.round(points[0])} {'->'} {Math.round(points[points.length - 1])} {unit}
+        </span>
+        <span className={isUp ? 'font-semibold text-rose-600' : 'font-semibold text-emerald-600'}>
+          {isUp ? '+' : ''}
+          {delta.toFixed(1)}%
+        </span>
+      </div>
+    </div>
+  )
+}
+
 const WorkspaceShellPage = () => {
   const router = useRouter()
   const [apartments, setApartments] = useState(() => buildDataset())
@@ -39,6 +84,17 @@ const WorkspaceShellPage = () => {
   }, [apartments, selectedFloor, searchValue, statusFilter, anomalyFilter])
 
   const summary = useMemo(() => {
+    const pointsCount = apartments[0]?.electricityDaily.length ?? 0
+    const powerSeries = Array.from({ length: pointsCount }, (_, hour) =>
+      apartments.reduce((sum, apartment) => sum + apartment.electricityDaily[hour], 0),
+    )
+    const waterSeries = Array.from({ length: pointsCount }, (_, hour) =>
+      apartments.reduce((sum, apartment) => sum + apartment.waterDaily[hour], 0),
+    )
+    const co2Series = Array.from({ length: pointsCount }, (_, hour) =>
+      apartments.reduce((sum, apartment) => sum + apartment.co2Series[hour], 0) / apartments.length,
+    )
+
     const totalPower = apartments.reduce(
       (sum, apartment) => sum + apartment.electricityDaily.reduce((inner, value) => inner + value, 0),
       0,
@@ -54,7 +110,7 @@ const WorkspaceShellPage = () => {
       ) / apartments.length,
     )
     const cityImpact = Math.max(18, Math.min(84, Math.round(totalPower / 16)))
-    return { totalPower, totalWater, averageAir, cityImpact }
+    return { totalPower, totalWater, averageAir, cityImpact, powerSeries, waterSeries, co2Series }
   }, [apartments])
 
   useEffect(() => {
@@ -99,6 +155,50 @@ const WorkspaceShellPage = () => {
   return (
     <AppShell title='Building Digital Twin' subtitle='Pick an apartment to open full analytics page'>
       <section className='mx-auto w-full max-w-7xl space-y-5'>
+        {/* Building summary */}
+        <article className='rounded-xl border border-slate-200 bg-white p-4 shadow-sm'>
+          <div className='mb-4 flex items-end justify-between gap-3'>
+            <div>
+              <h2 className='text-sm font-semibold text-slate-900'>Building summary</h2>
+              <p className='text-xs text-slate-500'>Live dynamics from all apartments</p>
+            </div>
+            <div className='text-xs text-slate-400'>Auto-update every 4 seconds</div>
+          </div>
+
+          <div className='mb-4 grid gap-3 sm:grid-cols-4'>
+            <div className='rounded-lg bg-slate-50 p-3'>
+              <p className='text-xs text-slate-500'>Power</p>
+              <p className='text-lg font-semibold text-slate-900'>{Math.round(summary.totalPower)} kWh</p>
+            </div>
+            <div className='rounded-lg bg-slate-50 p-3'>
+              <p className='text-xs text-slate-500'>Water</p>
+              <p className='text-lg font-semibold text-slate-900'>{Math.round(summary.totalWater)} L</p>
+            </div>
+            <div className='rounded-lg bg-slate-50 p-3'>
+              <p className='text-xs text-slate-500'>Air quality</p>
+              <p className='text-lg font-semibold text-slate-900'>{summary.averageAir} AQI</p>
+            </div>
+            <div className='rounded-lg bg-slate-50 p-3'>
+              <p className='text-xs text-slate-500'>City impact</p>
+              <p className='text-lg font-semibold text-slate-900'>{summary.cityImpact}%</p>
+            </div>
+          </div>
+
+          <div className='grid gap-3 lg:grid-cols-3'>
+            <div>
+              <p className='mb-2 text-xs font-medium text-slate-600'>Power trend</p>
+              <TrendLine points={summary.powerSeries} color='#2563eb' unit='kWh' />
+            </div>
+            <div>
+              <p className='mb-2 text-xs font-medium text-slate-600'>Water trend</p>
+              <TrendLine points={summary.waterSeries} color='#0891b2' unit='L' />
+            </div>
+            <div>
+              <p className='mb-2 text-xs font-medium text-slate-600'>CO2 trend</p>
+              <TrendLine points={summary.co2Series} color='#0f766e' unit='ppm' />
+            </div>
+          </div>
+        </article>
 
         {/* Filter bar */}
         <article className='rounded-xl border border-slate-200 bg-white p-4 shadow-sm'>
@@ -249,7 +349,7 @@ const WorkspaceShellPage = () => {
           ) : (
             <div className='space-y-3'>
               {floorGroups.map(({ floor, apts }) => (
-                <div key={floor} className='flex items-center gap-3'>
+                <div key={floor} className='flex items-center justify-center gap-3'>
                   {/* Floor label */}
                   <div className='w-14 shrink-0 text-right'>
                     <span className='rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500'>
@@ -258,7 +358,7 @@ const WorkspaceShellPage = () => {
                   </div>
 
                   {/* Apartment cards in one horizontal line */}
-                  <div className='flex flex-1 gap-2 overflow-x-auto pb-1'>
+                  <div className='flex flex-1 justify-center gap-2 overflow-x-auto overflow-y-visible py-1'>
                     {apts.map((apartment) => {
                       const statusRing =
                         apartment.status === 'good'
@@ -279,7 +379,7 @@ const WorkspaceShellPage = () => {
                           key={apartment.id}
                           type='button'
                           onClick={() => handleEnterApartment(apartment.id)}
-                          className={`flex min-w-[88px] shrink-0 flex-col rounded-lg border px-3 py-2 text-left transition-all hover:scale-[1.03] hover:shadow-sm active:scale-[0.98] ${statusRing}`}
+                          className={`flex min-w-[88px] shrink-0 flex-col rounded-lg border px-3 py-2 text-left transition-all hover:shadow-sm ${statusRing}`}
                         >
                           <div className='flex items-center justify-between gap-1'>
                             <p className='text-xs font-bold text-slate-800'>#{apartment.number}</p>
@@ -302,28 +402,6 @@ const WorkspaceShellPage = () => {
           )}
         </article>
 
-        {/* Building summary */}
-        <article className='rounded-xl border border-slate-200 bg-white p-4 shadow-sm'>
-          <h2 className='text-sm font-semibold text-slate-900'>Building summary</h2>
-          <div className='mt-3 grid gap-3 sm:grid-cols-4'>
-            <div className='rounded-lg bg-slate-50 p-3'>
-              <p className='text-xs text-slate-500'>Power</p>
-              <p className='text-lg font-semibold text-slate-900'>{Math.round(summary.totalPower)} kWh</p>
-            </div>
-            <div className='rounded-lg bg-slate-50 p-3'>
-              <p className='text-xs text-slate-500'>Water</p>
-              <p className='text-lg font-semibold text-slate-900'>{Math.round(summary.totalWater)} L</p>
-            </div>
-            <div className='rounded-lg bg-slate-50 p-3'>
-              <p className='text-xs text-slate-500'>Air quality</p>
-              <p className='text-lg font-semibold text-slate-900'>{summary.averageAir} AQI</p>
-            </div>
-            <div className='rounded-lg bg-slate-50 p-3'>
-              <p className='text-xs text-slate-500'>City impact</p>
-              <p className='text-lg font-semibold text-slate-900'>{summary.cityImpact}%</p>
-            </div>
-          </div>
-        </article>
       </section>
     </AppShell>
   )

@@ -12,8 +12,10 @@ Backend migrated from LMS domain to residential building management.
 ```bash
 cd backend
 source .venv/bin/activate  # or: venv\Scripts\activate on Windows
-uvicorn src.app:app --reload --port 8000
+uvicorn src.app:app --reload --port 8000 --host 0.0.0.0
 ```
+
+**For mobile testing on physical iPhone:** Use `--host 0.0.0.0` so the phone can reach the backend. Then set your Mac's IP in `mobile/src/config.ts` (run `ipconfig getifaddr en0` to get it).
 
 ## PostgreSQL (Tickets & Tasks)
 

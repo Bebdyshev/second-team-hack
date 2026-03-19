@@ -51,6 +51,13 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    host = request.client.host if request.client else "?"
+    print(f">>> {request.method} {request.url.path} (from {host})", flush=True)
+    response = await call_next(request)
+    return response
+
 app.include_router(housing_router)
 
 

@@ -1,21 +1,6 @@
 'use client'
 
-import {
-  FiAlertCircle,
-  FiAlertTriangle,
-  FiArrowDownRight,
-  FiArrowUpRight,
-  FiDroplet,
-  FiExternalLink,
-  FiHome,
-  FiShield,
-  FiThermometer,
-  FiTrendingUp,
-  FiWifi,
-  FiWifiOff,
-  FiWind,
-  FiZap,
-} from 'react-icons/fi'
+import { FiArrowDownRight, FiArrowUpRight } from 'react-icons/fi'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import {
@@ -83,24 +68,24 @@ type ApartmentSummaryResponse = {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const RESOURCE_ICON: Record<ResourceKey, React.ComponentType<{ className?: string }>> = {
-  electricity: FiZap,
-  water: FiDroplet,
-  gas: FiWind,
-  heating: FiThermometer,
+const RESOURCE_CONFIG: Record<ResourceKey, { label: string; unit: string; chart: string; bar: string }> = {
+  electricity: { label: 'Electricity', unit: 'kWh',  chart: '#f59e0b', bar: 'bg-amber-400'  },
+  water:       { label: 'Water',       unit: 'L',    chart: '#3b82f6', bar: 'bg-blue-400'   },
+  gas:         { label: 'Gas',         unit: 'm³',   chart: '#f97316', bar: 'bg-orange-400' },
+  heating:     { label: 'Heating',     unit: 'Gcal', chart: '#f43f5e', bar: 'bg-rose-400'   },
 }
 
-const RESOURCE_CONFIG: Record<ResourceKey, { label: string; unit: string; accent: string; chart: string; iconBg: string; iconText: string }> = {
-  electricity: { label: 'Electricity', unit: 'kWh', accent: 'text-amber-600', chart: '#f59e0b', iconBg: 'bg-amber-50', iconText: 'text-amber-600' },
-  water:       { label: 'Water',       unit: 'L',   accent: 'text-blue-600',  chart: '#3b82f6', iconBg: 'bg-blue-50',  iconText: 'text-blue-600'  },
-  gas:         { label: 'Gas',         unit: 'm³',  accent: 'text-orange-600',chart: '#f97316', iconBg: 'bg-orange-50',iconText: 'text-orange-600'},
-  heating:     { label: 'Heating',     unit: 'Gcal',accent: 'text-rose-600',  chart: '#f43f5e', iconBg: 'bg-rose-50',  iconText: 'text-rose-600'  },
+const RESOURCE_LABEL_COLOR: Record<ResourceKey, string> = {
+  electricity: 'text-amber-600',
+  water:       'text-blue-600',
+  gas:         'text-orange-600',
+  heating:     'text-rose-600',
 }
 
 const SEVERITY_CONFIG = {
-  high:   { badge: 'bg-rose-100 text-rose-700 border border-rose-200',   dot: 'bg-rose-500'   },
-  medium: { badge: 'bg-amber-100 text-amber-700 border border-amber-200', dot: 'bg-amber-500'  },
-  low:    { badge: 'bg-slate-100 text-slate-600 border border-slate-200', dot: 'bg-slate-400'  },
+  high:   { badge: 'bg-rose-100 text-rose-700',   dot: 'bg-rose-500'  },
+  medium: { badge: 'bg-amber-100 text-amber-700',  dot: 'bg-amber-500' },
+  low:    { badge: 'bg-slate-100 text-slate-500',  dot: 'bg-slate-400' },
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -109,26 +94,15 @@ const StatCard = ({
   label,
   value,
   sub,
-  icon: Icon,
-  iconBg,
-  iconText,
   trend,
 }: {
   label: string
   value: string | number
   sub: string
-  icon: React.ComponentType<{ className?: string }>
-  iconBg: string
-  iconText: string
   trend?: 'up' | 'down' | 'neutral'
 }) => (
   <div className='flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5'>
-    <div className='flex items-start justify-between'>
-      <p className='text-sm font-medium text-slate-500'>{label}</p>
-      <span className={`flex size-9 shrink-0 items-center justify-center rounded-xl ${iconBg} ${iconText}`}>
-        <Icon className='size-[18px]' />
-      </span>
-    </div>
+    <p className='text-sm font-medium text-slate-500'>{label}</p>
     <div>
       <p className='text-3xl font-bold tracking-tight text-slate-900'>{value}</p>
       <p className={`mt-1 flex items-center gap-1 text-xs ${trend === 'up' ? 'text-rose-500' : trend === 'down' ? 'text-emerald-500' : 'text-slate-400'}`}>
@@ -154,18 +128,13 @@ const SparklineCard = ({
   data: Array<{ label: string; value: number }>
 }) => {
   const cfg = RESOURCE_CONFIG[resourceKey]
-  const Icon = RESOURCE_ICON[resourceKey]
+  const labelColor = RESOURCE_LABEL_COLOR[resourceKey]
   const isUp = delta > 0
 
   return (
     <div className='flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 overflow-hidden'>
       <div className='flex items-center justify-between'>
-        <div className='flex items-center gap-2.5'>
-          <span className={`flex size-8 items-center justify-center rounded-lg ${cfg.iconBg} ${cfg.iconText}`}>
-            <Icon className='size-4' />
-          </span>
-          <p className='text-sm font-medium text-slate-700'>{cfg.label}</p>
-        </div>
+        <p className={`text-sm font-semibold ${labelColor}`}>{cfg.label}</p>
         <span className={`flex items-center gap-1 text-xs font-semibold ${isUp ? 'text-rose-500' : 'text-emerald-600'}`}>
           {isUp ? <FiArrowUpRight className='size-3' /> : <FiArrowDownRight className='size-3' />}
           {Math.abs(delta).toFixed(1)}%
@@ -331,53 +300,41 @@ const DashboardPage = () => {
       subtitle={isResident && apartmentNumber ? `Apartment #${apartmentNumber}` : 'Real-time resource monitoring'}
     >
       {pageError && (
-        <div className='mb-5 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700'>
-          <FiAlertCircle className='size-4 shrink-0' />
+        <div className='mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700'>
           {pageError}
         </div>
       )}
 
+      <div className='flex min-h-[calc(100vh-170px)] flex-col'>
       {/* ── KPI Row ── */}
-      <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
+      <div data-tour='dashboard-kpis' className='grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
         <StatCard
           label={isResident ? 'My apartment' : 'Buildings'}
           value={isResident && apartmentNumber ? `#${apartmentNumber}` : houses.length}
           sub={isResident ? 'Your unit' : `${totalUnits} total apartments`}
-          icon={FiHome}
-          iconBg='bg-blue-50'
-          iconText='text-blue-600'
         />
         <StatCard
           label='Active alerts'
           value={alerts.length}
           sub={`${highAlerts} critical need action`}
-          icon={FiAlertCircle}
-          iconBg='bg-rose-50'
-          iconText='text-rose-600'
           trend={highAlerts > 0 ? 'up' : 'neutral'}
         />
         <StatCard
           label={isResident ? 'Eco score' : 'Avg. occupancy'}
           value={isResident && apartmentScore != null ? apartmentScore : `${avgOccupancy}%`}
           sub={isResident ? 'Your unit efficiency' : 'Across all buildings'}
-          icon={FiTrendingUp}
-          iconBg='bg-emerald-50'
-          iconText='text-emerald-600'
           trend={isResident && apartmentScore != null && apartmentScore >= 70 ? 'down' : 'neutral'}
         />
         <StatCard
           label='Active meters'
           value={meters.length}
           sub={offlineMeters > 0 ? `${offlineMeters} offline · ${goodMeters} healthy` : `${goodMeters} all healthy`}
-          icon={offlineMeters > 0 ? FiWifiOff : FiWifi}
-          iconBg={offlineMeters > 0 ? 'bg-amber-50' : 'bg-violet-50'}
-          iconText={offlineMeters > 0 ? 'text-amber-600' : 'text-violet-600'}
           trend={offlineMeters > 0 ? 'up' : 'neutral'}
         />
       </div>
 
       {/* ── Resource sparklines ── */}
-      <div className='mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
+      <div data-tour='dashboard-resources' className='mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
         {resourceCards.map((card) => (
           <SparklineCard
             key={card.key}
@@ -391,44 +348,38 @@ const DashboardPage = () => {
       </div>
 
       {/* ── Lower grid ── */}
-      <div className='mt-5 grid gap-5 lg:grid-cols-3'>
+      <div data-tour='dashboard-panels' className='mt-5 grid flex-1 min-h-0 gap-5 lg:grid-cols-3'>
 
         {/* Buildings / Apartment */}
-        <div className='rounded-2xl border border-slate-200 bg-white p-5'>
+        <div className='flex min-h-0 flex-col rounded-2xl border border-slate-200 bg-white p-5'>
           <SectionHeader
             title={isResident ? 'My apartment' : 'Buildings'}
             count={isResident ? undefined : houses.length}
             href={isResident ? undefined : '/workspace-shell'}
           />
-          <div className='space-y-2'>
+          <div className='flex-1 space-y-2 overflow-auto pr-1'>
             {isResident && myApartmentId && apartmentNumber ? (
               <Link
                 href={`/workspace-shell/${myApartmentId}`}
-                className='flex items-center gap-3 rounded-xl border border-slate-100 p-3 transition-colors hover:bg-slate-50'
+                className='flex items-center justify-between rounded-xl border border-slate-100 p-3 transition-colors hover:bg-slate-50'
               >
-                <div className='flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600'>
-                  <FiHome className='size-5' />
-                </div>
-                <div className='min-w-0 flex-1'>
+                <div className='min-w-0'>
                   <p className='truncate text-sm font-semibold text-slate-900'>Apartment #{apartmentNumber}</p>
                   <p className='truncate text-xs text-slate-400'>View full analytics →</p>
                 </div>
-                <div className='text-right'>
+                <div className='text-right ml-3'>
                   <p className='text-lg font-bold text-slate-900'>{apartmentScore ?? '—'}</p>
                   <p className='text-[10px] text-slate-400'>eco score</p>
                 </div>
               </Link>
             ) : (
               houses.map((house) => (
-                <div key={house.id} className='flex items-center gap-3 rounded-xl border border-slate-100 p-3'>
-                  <div className='flex size-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500'>
-                    <FiHome className='size-4' />
-                  </div>
-                  <div className='min-w-0 flex-1'>
+                <div key={house.id} className='flex items-center justify-between rounded-xl border border-slate-100 p-3'>
+                  <div className='min-w-0'>
                     <p className='truncate text-sm font-semibold text-slate-900'>{house.name}</p>
                     <p className='truncate text-xs text-slate-400'>{house.address}</p>
                   </div>
-                  <div className='text-right'>
+                  <div className='text-right ml-3 shrink-0'>
                     <p className='text-sm font-bold text-slate-900'>{house.occupancy_rate}%</p>
                     <p className='text-[10px] text-slate-400'>{house.units_count} units</p>
                   </div>
@@ -439,58 +390,55 @@ const DashboardPage = () => {
         </div>
 
         {/* Alerts */}
-        <div className='rounded-2xl border border-slate-200 bg-white p-5'>
+        <div className='flex min-h-0 flex-col rounded-2xl border border-slate-200 bg-white p-5'>
           <SectionHeader title='Recent anomalies' count={alerts.length} href='/alerts' />
-          <div className='space-y-2'>
+          <div className='flex-1 space-y-2 overflow-auto pr-1'>
             {alerts.length === 0 ? (
               <p className='py-6 text-center text-sm text-slate-400'>No active anomalies</p>
             ) : (
               alerts.slice(0, 5).map((alert) => {
-                const Icon = RESOURCE_ICON[alert.resource]
-                const cfg = RESOURCE_CONFIG[alert.resource]
                 const sev = SEVERITY_CONFIG[alert.severity]
+                const labelColor = RESOURCE_LABEL_COLOR[alert.resource]
                 return (
-                  <div key={alert.id} className='flex items-start gap-3 rounded-xl border border-slate-100 p-3'>
-                    <span className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg ${cfg.iconBg} ${cfg.iconText}`}>
-                      <Icon className='size-3.5' />
-                    </span>
-                    <div className='min-w-0 flex-1'>
-                      <p className='truncate text-sm font-medium text-slate-900'>{alert.title}</p>
-                      <p className='mt-0.5 text-xs text-slate-400'>{alert.house_name} · {alert.detected_at}</p>
+                  <div key={alert.id} className='rounded-xl border border-slate-100 p-3'>
+                    <div className='flex items-start justify-between gap-2'>
+                      <p className='text-sm font-medium text-slate-900 leading-snug'>{alert.title}</p>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${sev.badge}`}>
+                        {alert.severity}
+                      </span>
                     </div>
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${sev.badge}`}>
-                      {alert.severity}
-                    </span>
+                    <p className='mt-1 text-xs text-slate-400'>
+                      <span className={`font-medium ${labelColor}`}>{alert.resource}</span>
+                      {' · '}{alert.house_name} · {alert.detected_at}
+                    </p>
                   </div>
                 )
               })
             )}
           </div>
           {highAlerts > 0 && (
-            <div className='mt-3 flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-100 px-3 py-2 text-xs text-rose-600'>
-              <FiAlertTriangle className='size-3.5 shrink-0' />
+            <div className='mt-3 rounded-xl bg-rose-50 border border-rose-100 px-3 py-2 text-xs text-rose-600'>
               {highAlerts} alert{highAlerts !== 1 ? 's' : ''} need immediate attention
             </div>
           )}
         </div>
 
         {/* Proofs / Meters */}
-        <div className='rounded-2xl border border-slate-200 bg-white p-5'>
+        <div className='flex min-h-0 flex-col rounded-2xl border border-slate-200 bg-white p-5'>
           <SectionHeader
             title={isResident ? 'Verified proofs' : 'Manager actions proof'}
             count={proofs.length}
             href='/reports'
           />
           {proofs.length === 0 ? (
-            <div className='flex flex-col items-center justify-center gap-2 py-8 text-center'>
-              <FiShield className='size-8 text-slate-200' />
+            <div className='flex flex-col items-center justify-center gap-1.5 py-8 text-center'>
               <p className='text-sm text-slate-400'>No proofs anchored yet</p>
               {!isResident && (
                 <Link href='/reports' className='text-xs text-blue-600 hover:underline'>Anchor a report →</Link>
               )}
             </div>
           ) : (
-            <div className='space-y-2'>
+            <div className='flex-1 space-y-2 overflow-auto pr-1'>
               {proofs.slice(0, 4).map((proof) => (
                 <div key={proof.id} className='rounded-xl border border-slate-100 p-3'>
                   <div className='flex items-center justify-between gap-2'>
@@ -508,10 +456,9 @@ const DashboardPage = () => {
                       href={proof.explorer_url}
                       target='_blank'
                       rel='noreferrer'
-                      className='mt-1.5 inline-flex items-center gap-1 font-mono text-[10px] text-blue-600 hover:underline'
+                      className='mt-1.5 inline-block font-mono text-[10px] text-blue-600 hover:underline'
                     >
-                      <FiExternalLink className='size-2.5' />
-                      {proof.tx_hash.slice(0, 14)}…
+                      {proof.tx_hash.slice(0, 16)}…
                     </a>
                   )}
                 </div>
@@ -572,6 +519,7 @@ const DashboardPage = () => {
           </div>
         </div>
       )}
+      </div>
     </AppShell>
   )
 }

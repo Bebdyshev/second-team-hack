@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { useState } from 'react'
 import {
   FiActivity,
   FiAlertTriangle,
@@ -14,6 +15,7 @@ import {
   FiTrendingUp,
   FiWifi,
 } from 'react-icons/fi'
+import { AppOnboarding } from '@/components/app-onboarding'
 import { useAuth } from '@/context/auth-context'
 
 type NavItem = {
@@ -51,6 +53,7 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
   const pathname = usePathname()
   const router = useRouter()
   const { user, activeRole, logout } = useAuth()
+  const [tourStartToken, setTourStartToken] = useState(0)
 
   const userName = user?.full_name || 'User'
   const userEmail = user?.email || 'user@resmonitor.kz'
@@ -63,7 +66,7 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
 
   return (
     <main className={`flex ${rightPanel ? 'h-screen overflow-hidden' : 'min-h-screen items-start'} bg-[#f0f2f5]`}>
-      <aside className='sticky top-0 flex h-screen w-60 shrink-0 self-start flex-col border-r border-slate-200 bg-white'>
+      <aside data-tour='sidebar' className='sticky top-0 flex h-screen w-60 shrink-0 self-start flex-col border-r border-slate-200 bg-white'>
         {/* Logo */}
         <div className='flex items-center gap-3 px-5 py-5'>
           <div>
@@ -89,6 +92,7 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
                 <Link
                   key={item.href}
                   href={item.href}
+                  data-tour={`nav-${item.href.replace(/\//g, '-').replace(/^-/, '')}`}
                   className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${
                     isActive
                       ? 'bg-slate-100 text-slate-900'
@@ -118,6 +122,7 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
           <button
             type='button'
             onClick={handleLogout}
+            data-tour='account-menu'
             className='group mt-2 flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition-colors hover:bg-slate-100'
             aria-label='Log out from account'
           >
@@ -138,13 +143,21 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
       {/* Main content */}
       <section className='flex min-w-0 flex-1 flex-col'>
         {/* Topbar */}
-        <header className='flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3.5'>
+        <header data-tour='topbar' className='flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3.5'>
           <div>
-            <h1 className='text-base font-semibold text-slate-900'>{title}</h1>
+            <h1 data-tour='page-title' className='text-base font-semibold text-slate-900'>{title}</h1>
             {subtitle && <p className='text-xs text-slate-500'>{subtitle}</p>}
           </div>
           <div className='flex items-center gap-2'>
-            <div className='flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700'>
+            <button
+              type='button'
+              data-tour='onboarding-trigger'
+              onClick={() => setTourStartToken((token) => token + 1)}
+              className='rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100'
+            >
+              Onboarding
+            </button>
+            <div data-tour='live-badge' className='flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700'>
               <span className='size-1.5 animate-pulse rounded-full bg-emerald-500' />
               Live
             </div>
@@ -157,6 +170,7 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
         {/* Page body */}
         <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           <div
+            data-tour='page-content'
             className='min-w-0 flex-1 overflow-auto p-6'
             style={{
               paddingRight: rightPanel && rightPanelOpen ? PANEL_WIDTH + 24 : 24,
@@ -183,6 +197,7 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
           )}
         </div>
       </section>
+      <AppOnboarding pathname={pathname} activeRole={activeRole} startToken={tourStartToken} />
     </main>
   )
 }

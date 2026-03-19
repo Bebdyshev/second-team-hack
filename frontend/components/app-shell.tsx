@@ -3,18 +3,16 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
+  FiActivity,
   FiAlertTriangle,
-  FiBarChart2,
+  FiBarChart,
   FiDatabase,
-  FiFileText,
-  FiGrid,
   FiHome,
+  FiLayers,
   FiLogOut,
   FiMessageCircle,
-  FiSettings,
-  FiTool,
+  FiTrendingUp,
   FiWifi,
-  FiZap,
 } from 'react-icons/fi'
 import { useAuth } from '@/context/auth-context'
 
@@ -28,13 +26,13 @@ type NavItem = {
 }
 
 const mainLinks: NavItem[] = [
-  { href: '/dashboard', label: 'Overview', icon: FiGrid },
-  { href: '/workspace-shell', label: 'My Apartment', labelManager: 'Buildings', icon: FiHome },
-  { href: '/tasks-board', label: 'Daily Tasks', icon: FiBarChart2 },
+  { href: '/dashboard', label: 'Overview', icon: FiHome },
+  { href: '/workspace-shell', label: 'My Apartment', labelManager: 'Buildings', icon: FiLayers },
+  { href: '/tasks-board', label: 'Daily Tasks', icon: FiBarChart },
   { href: '/data-tables', label: 'Meters', icon: FiDatabase },
   { href: '/knowledge-base', label: 'Alerts', icon: FiAlertTriangle },
-  { href: '/agents', label: 'Maintenance', icon: FiTool },
-  { href: '/legal-assistant', label: 'Reports', icon: FiFileText },
+  { href: '/agents', label: 'Maintenance', icon: FiActivity },
+  { href: '/legal-assistant', label: 'Reports', icon: FiTrendingUp },
   { href: '/tickets', label: 'Tickets', icon: FiMessageCircle, residentOnly: true },
   { href: '/api-status', label: 'Integrations', icon: FiWifi, managerOnly: true },
 ]
@@ -76,7 +74,7 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
 
         <div className='flex-1 overflow-y-auto px-3 pb-4 scrollbar-hide'>
           <p className='mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-400'>Navigation</p>
-          <nav className='space-y-0.5'>
+          <nav className='space-y-1'>
             {mainLinks
               .filter((item) => {
                 if (item.managerOnly && activeRole !== 'Manager') return false
@@ -91,13 +89,24 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                  className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${
                     isActive
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                      ? 'bg-slate-100 text-slate-900'
+                      : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
                   }`}
                 >
-                  <Icon className='size-4 shrink-0' />
+                  <span
+                    className={`absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full transition-opacity ${
+                      isActive ? 'bg-blue-500 opacity-100' : 'opacity-0 group-hover:opacity-50'
+                    }`}
+                  />
+                  <span
+                    className={`inline-flex size-5 shrink-0 items-center justify-center rounded-md transition-colors ${
+                      isActive ? 'text-blue-600' : 'text-slate-500 group-hover:text-slate-700'
+                    }`}
+                  >
+                    <Icon className='size-[15px]' />
+                  </span>
                   {displayLabel}
                 </Link>
               )
@@ -106,30 +115,22 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
         </div>
 
         <div className='border-t border-slate-200 px-3 py-3'>
-          <Link
-            href='/api-status'
-            className='flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900'
+          <button
+            type='button'
+            onClick={handleLogout}
+            className='group mt-2 flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition-colors hover:bg-slate-100'
+            aria-label='Log out from account'
           >
-            <FiSettings className='size-4' />
-            Settings
-          </Link>
-          <div className='mt-3 flex items-center gap-2.5 px-1'>
-            <div className='flex size-7 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 to-violet-500 text-[10px] font-bold text-white'>
+            <div className='flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 to-violet-500 text-[10px] font-bold text-white'>
               {userInitial}
             </div>
             <div className='min-w-0 flex-1'>
               <p className='truncate text-xs font-medium text-slate-800'>{activeRole || 'User'}</p>
               <p className='truncate text-[10px] text-slate-500'>{userEmail}</p>
             </div>
-          </div>
-          <button
-            type='button'
-            onClick={handleLogout}
-            className='mt-3 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-rose-600 transition-colors hover:bg-rose-50 hover:text-rose-700'
-            aria-label='Log out'
-          >
-            <FiLogOut className='size-4' />
-            Log out
+            <span className='inline-flex size-6 shrink-0 items-center justify-center rounded-md text-rose-500 opacity-0 transition-all duration-150 group-hover:opacity-100 group-hover:bg-rose-50 group-hover:text-rose-600'>
+              <FiLogOut className='size-4' />
+            </span>
           </button>
         </div>
       </aside>

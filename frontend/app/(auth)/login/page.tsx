@@ -26,7 +26,7 @@ const LoginPage = () => {
       await login({ email, password })
       router.push('/workspace-shell')
     } catch (requestError) {
-      const message = getErrorMessage(requestError, locale == 'ru' ? 'Ошибка входа' : 'Login failed')
+      const message = getErrorMessage(requestError, locale === 'ru' ? 'Ошибка входа' : 'Login failed')
       setError(message)
       toast.error(message)
     } finally {
@@ -34,15 +34,10 @@ const LoginPage = () => {
     }
   }
 
-  const handleGoogleClick = () => {
-    toast.error(locale == 'ru' ? 'Google OAuth будет подключен отдельно' : 'Google OAuth will be connected separately')
-  }
-
   return (
     <Login1
-      heading={locale == 'ru' ? 'Вход' : 'Login'}
-      buttonText={locale == 'ru' ? 'Войти' : 'Login'}
-      googleText={locale == 'ru' ? 'Войти через Google' : 'Sign in with Google'}
+      heading={locale === 'ru' ? 'Вход' : 'Login'}
+      buttonText={locale === 'ru' ? 'Войти' : 'Sign In'}
       email={email}
       password={password}
       error={error}
@@ -50,7 +45,6 @@ const LoginPage = () => {
       onEmailChange={setEmail}
       onPasswordChange={setPassword}
       onSubmit={() => void handleSubmit()}
-      onGoogleClick={handleGoogleClick}
     />
   )
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   FiAlertTriangle,
   FiBarChart2,
@@ -10,11 +10,13 @@ import {
   FiGrid,
   FiHome,
   FiLayers,
+  FiLogOut,
   FiSettings,
   FiTool,
   FiWifi,
   FiZap,
 } from 'react-icons/fi'
+import { useAuth } from '@/context/auth-context'
 
 type NavItem = {
   href: string
@@ -45,6 +47,17 @@ const PANEL_WIDTH = 360
 
 export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen = true }: AppShellProps) => {
   const pathname = usePathname()
+  const router = useRouter()
+  const { user, activeRole, logout } = useAuth()
+
+  const userName = user?.full_name || 'User'
+  const userEmail = user?.email || 'user@resmonitor.kz'
+  const userInitial = (userName[0] || 'U').toUpperCase()
+
+  const handleLogout = () => {
+    logout()
+    router.push('/login')
+  }
 
   return (
     <main className={`flex ${rightPanel ? 'h-screen overflow-hidden' : 'min-h-screen items-start'} bg-[#f0f2f5]`}>
@@ -91,13 +104,22 @@ export const AppShell = ({ title, subtitle, children, rightPanel, rightPanelOpen
           </Link>
           <div className='mt-3 flex items-center gap-2.5 px-1'>
             <div className='flex size-7 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 to-violet-500 text-[10px] font-bold text-white'>
-              A
+              {userInitial}
             </div>
             <div className='min-w-0 flex-1'>
-              <p className='truncate text-xs font-medium text-slate-800'>Admin</p>
-              <p className='truncate text-[10px] text-slate-500'>admin@resmonitor.kz</p>
+              <p className='truncate text-xs font-medium text-slate-800'>{activeRole || 'User'}</p>
+              <p className='truncate text-[10px] text-slate-500'>{userEmail}</p>
             </div>
           </div>
+          <button
+            type='button'
+            onClick={handleLogout}
+            className='mt-3 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-rose-600 transition-colors hover:bg-rose-50 hover:text-rose-700'
+            aria-label='Log out'
+          >
+            <FiLogOut className='size-4' />
+            Log out
+          </button>
         </div>
       </aside>
 

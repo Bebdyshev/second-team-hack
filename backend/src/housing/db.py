@@ -57,8 +57,10 @@ def init_housing_db() -> None:
 def _ensure_housing_schema(engine) -> None:
     """Backfill new nullable columns for existing housing tables."""
     statements = [
-        "ALTER TABLE IF EXISTS housing_tasks ADD COLUMN IF NOT EXISTS complaint_type VARCHAR(32)",
-        "ALTER TABLE IF EXISTS housing_tickets ADD COLUMN IF NOT EXISTS complaint_type VARCHAR(32)",
+        "ALTER TABLE IF EXISTS housing_tasks ADD COLUMN IF NOT EXISTS complaint_type VARCHAR(64)",
+        "ALTER TABLE IF EXISTS housing_tickets ADD COLUMN IF NOT EXISTS complaint_type VARCHAR(64)",
+        "ALTER TABLE housing_tasks ALTER COLUMN complaint_type TYPE VARCHAR(64) USING complaint_type::VARCHAR(64)",
+        "ALTER TABLE housing_tickets ALTER COLUMN complaint_type TYPE VARCHAR(64) USING complaint_type::VARCHAR(64)",
     ]
     with engine.begin() as conn:
         for statement in statements:

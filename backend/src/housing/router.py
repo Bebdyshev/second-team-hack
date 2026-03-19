@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 
-from src.housing import groq_client, store, web3
+from src.housing import gemini_client, store, web3
 from src.housing.schemas import (
     AnchorRequest,
     Apartment,
@@ -428,8 +428,8 @@ def create_ticket(
     house = store.get_house(user["house_id"])
     building_name = house.name if house else "Maple Residence"
 
-    # Transform ticket to task via Groq Qwen3-32B and add to Daily Tasks
-    task_data = groq_client.transform_ticket_to_task(
+    # Transform ticket to task via Gemini and add to Daily Tasks
+    task_data = gemini_client.transform_ticket_to_task(
         subject=payload.subject,
         description=payload.description,
         incident_date=payload.incident_date,
@@ -437,15 +437,14 @@ def create_ticket(
         apartment_id=apt_id,
         building_name=building_name,
     )
+    complaint_types_str = task_data.get("complaint_types", "general") if task_data else "general"
     complaint_type = task_data.get("complaint_type", "general") if task_data else "general"
-    classification_reason = (task_data or {}).get("classification_reason")
     logger.info(
-        "ticket_classification_result resident_id=%s house_id=%s complaint_type=%s ai_used=%s reason=%r",
+        "ticket_classification_result resident_id=%s house_id=%s tags=%s ai_used=%s",
         user["id"],
         user["house_id"],
-        complaint_type,
+        complaint_types_str,
         bool(task_data),
-        classification_reason,
     )
 
     ticket = store.create_ticket(
@@ -459,7 +458,7 @@ def create_ticket(
         incident_date=payload.incident_date,
         incident_time=payload.incident_time,
         attachments=payload.attachments,
-        complaint_type=complaint_type,
+        complaint_type=complaint_types_str,
         db=db,
     )
 
@@ -475,12 +474,12 @@ def create_ticket(
             apartment=task_data.get("apartment"),
             ai_comment=task_data.get("ai_comment"),
             source_ticket_id=ticket.id,
-            complaint_type=complaint_type,
+            complaint_type=complaint_types_str,
             db=db,
         )
     else:
         logger.warning(
-            "ticket_classification_fallback resident_id=%s house_id=%s complaint_type=general reason=groq_unavailable_or_parse_failed",
+            "ticket_classification_fallback resident_id=%s house_id=%s complaint_type=general reason=gemini_unavailable_or_parse_failed",
             user["id"],
             user["house_id"],
         )

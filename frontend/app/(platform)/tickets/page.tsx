@@ -32,6 +32,7 @@ type Ticket = {
   viewed_at: string | null
   decision: string | null
   complaint_type: ComplaintType | null
+  complaint_types?: ComplaintType[]
 }
 
 const statusLabel: Record<string, string> = {
@@ -168,11 +169,11 @@ const TicketsPage = () => {
                   <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColor[t.status]}`}>
                     {statusLabel[t.status]}
                   </span>
-                  {t.complaint_type && (
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${complaintTypeColor[t.complaint_type]}`}>
-                      {complaintTypeLabel[t.complaint_type]}
+                  {(t.complaint_types?.length ? t.complaint_types : t.complaint_type ? [t.complaint_type] : []).map((tag) => (
+                    <span key={tag} className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${complaintTypeColor[tag]}`}>
+                      {complaintTypeLabel[tag]}
                     </span>
-                  )}
+                  ))}
                   {t.follow_ups.length > 0 && (
                     <span className='flex shrink-0 items-center gap-1 text-xs text-slate-400'>
                       <FiMessageCircle className='size-3.5' />
@@ -431,11 +432,11 @@ function TicketDetailModal({
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColor[ticket.status]}`}>
               {statusLabel[ticket.status]}
             </span>
-            {ticket.complaint_type && (
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${complaintTypeColor[ticket.complaint_type]}`}>
-                {complaintTypeLabel[ticket.complaint_type]}
+            {(ticket.complaint_types?.length ? ticket.complaint_types : ticket.complaint_type ? [ticket.complaint_type] : []).map((tag) => (
+              <span key={tag} className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${complaintTypeColor[tag]}`}>
+                {complaintTypeLabel[tag]}
               </span>
-            )}
+            ))}
             <span className='text-xs text-slate-500'>
               {ticket.resident_name} · Apt {ticket.apartment_id.replace('apt-', '')}
             </span>

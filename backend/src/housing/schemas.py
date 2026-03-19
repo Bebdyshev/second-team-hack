@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Any
+from typing import Literal, Any, get_args
 
 from pydantic import BaseModel, Field, EmailStr
 
@@ -174,6 +174,15 @@ TaskPriority = Literal["low", "medium", "high", "critical"]
 TaskCategory = Literal["inspection", "repair", "meter", "complaint", "report"]
 ComplaintType = Literal["neighbors", "water", "electricity", "schedule", "general", "recommendation"]
 
+VALID_COMPLAINT_TYPES = frozenset(get_args(ComplaintType))
+
+
+def _parse_complaint_types(raw: str | None) -> list[ComplaintType]:
+    if not raw:
+        return []
+    tags = [t.strip().lower() for t in raw.split(",") if t.strip()]
+    return [t for t in tags if t in VALID_COMPLAINT_TYPES]
+
 
 class Task(BaseModel):
     id: str
@@ -189,6 +198,7 @@ class Task(BaseModel):
     ai_comment: str | None = None
     source_ticket_id: str | None = None
     complaint_type: ComplaintType | None = None
+    complaint_types: list[ComplaintType] = []
     created_at: str
 
 
@@ -247,6 +257,7 @@ class Ticket(BaseModel):
     viewed_at: datetime | None = None
     decision: str | None = None
     complaint_type: ComplaintType | None = None
+    complaint_types: list[ComplaintType] = []
 
 
 class TicketCreate(BaseModel):

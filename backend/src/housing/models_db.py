@@ -26,7 +26,7 @@ class HousingTaskModel(Base):
     apartment = Column(String(64), nullable=True)
     ai_comment = Column(Text, nullable=True)
     source_ticket_id = Column(String(64), nullable=True)
-    complaint_type = Column(String(32), nullable=True)
+    complaint_type = Column(String(64), nullable=True)  # comma-separated tags
     created_at = Column(String(16), nullable=False)
 
 
@@ -49,7 +49,7 @@ class HousingTicketModel(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False)
     viewed_at = Column(DateTime(timezone=True), nullable=True)
     decision = Column(Text, nullable=True)
-    complaint_type = Column(String(32), nullable=True)
+    complaint_type = Column(String(64), nullable=True)  # comma-separated tags
 
     follow_ups = relationship("HousingTicketFollowUpModel", back_populates="ticket", order_by="HousingTicketFollowUpModel.created_at")
 

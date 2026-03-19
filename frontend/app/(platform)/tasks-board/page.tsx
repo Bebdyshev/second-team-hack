@@ -58,6 +58,7 @@ type Task = {
   aiComment?: string | null
   sourceTicketId?: string | null
   complaintType?: ComplaintType | null
+  complaintTypes?: ComplaintType[]
   createdAt: string
 }
 
@@ -108,6 +109,7 @@ type ApiTask = {
   ai_comment?: string | null
   source_ticket_id?: string | null
   complaint_type?: ComplaintType | null
+  complaint_types?: ComplaintType[]
   created_at: string
 }
 
@@ -117,6 +119,7 @@ const mapApiTask = (t: ApiTask): Task => ({
   aiComment: t.ai_comment,
   sourceTicketId: t.source_ticket_id,
   complaintType: t.complaint_type,
+  complaintTypes: t.complaint_types ?? (t.complaint_type ? [t.complaint_type] : []),
   createdAt: t.created_at,
 })
 
@@ -156,11 +159,11 @@ type TaskCardContentProps = { task: Task; isOverlay?: boolean }
 const TaskCardContent = ({ task, isOverlay }: TaskCardContentProps) => {
   const priorityCfg = PRIORITY_CONFIG[task.priority]
   const categoryCfg = CATEGORY_CONFIG[task.category]
-  const complaintTypeCfg = task.complaintType ? COMPLAINT_TYPE_CONFIG[task.complaintType] : null
+  const tags = task.complaintTypes?.length ? task.complaintTypes : task.complaintType ? [task.complaintType] : []
   return (
     <article className={`rounded-md bg-white p-2.5 ${isOverlay ? 'shadow-lg ring-1 ring-slate-200' : ''}`}>
       <div className='mb-1.5 flex items-start justify-between gap-1.5'>
-        <div className='flex items-center gap-1.5'>
+        <div className='flex flex-wrap items-center gap-1.5'>
           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${priorityCfg.color}`}>
             <span className={`size-1.5 rounded-full ${priorityCfg.dot}`} />
             {priorityCfg.label}
@@ -168,11 +171,11 @@ const TaskCardContent = ({ task, isOverlay }: TaskCardContentProps) => {
           <span className='inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600'>
             {categoryCfg.label}
           </span>
-          {complaintTypeCfg && (
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${complaintTypeCfg.color}`}>
-              {complaintTypeCfg.label}
+          {tags.map((tag) => (
+            <span key={tag} className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${COMPLAINT_TYPE_CONFIG[tag].color}`}>
+              {COMPLAINT_TYPE_CONFIG[tag].label}
             </span>
-          )}
+          ))}
         </div>
         <span className='shrink-0 text-[10px] font-medium text-slate-400'>{task.dueTime}</span>
       </div>
@@ -222,7 +225,10 @@ const TasksBoardPage = () => {
   const filteredTasks = tasks.filter((task) => {
     if (filterPriority !== 'all' && task.priority !== filterPriority) return false
     if (filterBuilding !== 'all' && task.building !== filterBuilding) return false
-    if (filterComplaintType !== 'all' && task.complaintType !== filterComplaintType) return false
+    if (filterComplaintType !== 'all') {
+      const tags = task.complaintTypes?.length ? task.complaintTypes : task.complaintType ? [task.complaintType] : []
+      if (!tags.includes(filterComplaintType)) return false
+    }
     return true
   })
 

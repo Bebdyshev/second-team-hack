@@ -8,10 +8,12 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from src.housing.models_db import HousingTaskModel, HousingTicketFollowUpModel, HousingTicketModel
-from src.housing.schemas import Task, Ticket, TicketAttachment, TicketFollowUp
+from src.housing.schemas import Task, Ticket, TicketAttachment, TicketFollowUp, _parse_complaint_types
 
 
 def _task_from_row(m: HousingTaskModel) -> Task:
+    tags = _parse_complaint_types(m.complaint_type)
+    primary = tags[0] if tags else None
     return Task(
         id=m.id,
         title=m.title,
@@ -25,7 +27,8 @@ def _task_from_row(m: HousingTaskModel) -> Task:
         apartment=m.apartment,
         ai_comment=m.ai_comment,
         source_ticket_id=m.source_ticket_id,
-        complaint_type=m.complaint_type,
+        complaint_type=primary,
+        complaint_types=tags,
         created_at=m.created_at,
     )
 
@@ -43,6 +46,8 @@ def _ticket_from_row(m: HousingTicketModel) -> Ticket:
         for fu in m.follow_ups
     ]
     attachments = [TicketAttachment(name=a.get("name", ""), url=a.get("url")) for a in (m.attachments or [])]
+    tags = _parse_complaint_types(m.complaint_type)
+    primary = tags[0] if tags else None
     return Ticket(
         id=m.id,
         house_id=m.house_id,
@@ -61,7 +66,8 @@ def _ticket_from_row(m: HousingTicketModel) -> Ticket:
         updated_at=m.updated_at,
         viewed_at=m.viewed_at,
         decision=m.decision,
-        complaint_type=m.complaint_type,
+        complaint_type=primary,
+        complaint_types=tags,
     )
 
 

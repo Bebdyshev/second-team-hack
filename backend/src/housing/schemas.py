@@ -204,6 +204,7 @@ class UpdateTaskRequest(BaseModel):
     status: TaskStatus | None = None
     title: str | None = None
     description: str | None = None
+    decision: str | None = None  # When marking done from ticket: note for resident
 
 
 # ── Tickets ───────────────────────────────────────────────────────────────────

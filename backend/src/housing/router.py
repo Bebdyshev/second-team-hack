@@ -32,8 +32,8 @@ from src.housing.schemas import (
     TicketFollowUpCreate,
     TicketUpdate,
 )
+from src.housing.db import get_housing_db
 from src.housing.security import get_current_user, issue_tokens_for_user, require_manager, verify_refresh_token_and_get_user
-
 
 router = APIRouter()
 
@@ -329,14 +329,22 @@ def manager_action_proofs(house_id: str | None = Query(default=None), user: dict
 
 
 @router.get("/tasks", response_model=list[Task])
-def list_tasks(house_id: str | None = Query(default=None), user: dict[str, str] = Depends(get_current_user)) -> list[Task]:
+def list_tasks(
+    house_id: str | None = Query(default=None),
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> list[Task]:
     target_house = house_id or user["house_id"]
     _assert_house_access(user, target_house)
-    return store.list_tasks(target_house)
+    return store.list_tasks(target_house, db=db)
 
 
 @router.post("/tasks", response_model=Task, status_code=201)
-def create_task(payload: CreateTaskRequest, user: dict[str, str] = Depends(require_manager)) -> Task:
+def create_task(
+    payload: CreateTaskRequest,
+    user: dict[str, str] = Depends(require_manager),
+    db=Depends(get_housing_db),
+) -> Task:
     house_id = payload.house_id or user["house_id"]
     _assert_house_access(user, house_id)
     return store.create_task(
@@ -347,12 +355,18 @@ def create_task(payload: CreateTaskRequest, user: dict[str, str] = Depends(requi
         priority=payload.priority,
         due_time=payload.due_time,
         house_id=house_id,
+        db=db,
     )
 
 
 @router.patch("/tasks/{task_id}", response_model=Task)
-def update_task(task_id: str, payload: UpdateTaskRequest, user: dict[str, str] = Depends(get_current_user)) -> Task:
-    task = store.get_task(task_id)
+def update_task(
+    task_id: str,
+    payload: UpdateTaskRequest,
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> Task:
+    task = store.get_task(task_id, db=db)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="task not found")
     if task.house_id != "all" and task.house_id != user["house_id"]:
@@ -363,26 +377,45 @@ def update_task(task_id: str, payload: UpdateTaskRequest, user: dict[str, str] =
         status=payload.status,
         title=payload.title,
         description=payload.description,
+        db=db,
     )
     if updated is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="task not found")
+
+    # Sync task status → ticket so resident sees manager's progress
+    ticket_id = updated.source_ticket_id
+    if ticket_id:
+        if payload.status == "in_progress":
+            store.update_ticket_status(ticket_id, "viewing", viewed_at=store.now_utc(), db=db)
+        elif payload.status == "done":
+            decision = (payload.decision or "Resolved").strip() or "Resolved"
+            store.update_ticket_status(ticket_id, "decision", decision=decision, db=db)
+
     return updated
 
 
 @router.delete("/tasks/{task_id}", status_code=204)
-def delete_task_route(task_id: str, user: dict[str, str] = Depends(require_manager)) -> Response:
-    task = store.get_task(task_id)
+def delete_task_route(
+    task_id: str,
+    user: dict[str, str] = Depends(require_manager),
+    db=Depends(get_housing_db),
+) -> Response:
+    task = store.get_task(task_id, db=db)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="task not found")
     if task.house_id != "all" and task.house_id != user["house_id"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden for this task")
-    store.delete_task(task_id)
+    store.delete_task(task_id, db=db)
     return Response(status_code=204)
 
 
 # ── Tickets ───────────────────────────────────────────────────────────────────
 @router.post("/tickets", response_model=Ticket, status_code=201)
-def create_ticket(payload: TicketCreate, user: dict[str, str] = Depends(get_current_user)) -> Ticket:
+def create_ticket(
+    payload: TicketCreate,
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> Ticket:
     if user["role"] != "Resident":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="only residents can create tickets")
     apt_id = user.get("apartment_id") or ""
@@ -403,6 +436,7 @@ def create_ticket(payload: TicketCreate, user: dict[str, str] = Depends(get_curr
         incident_date=payload.incident_date,
         incident_time=payload.incident_time,
         attachments=payload.attachments,
+        db=db,
     )
 
     # Transform ticket to task via Groq Qwen3-32B and add to Daily Tasks
@@ -426,6 +460,7 @@ def create_ticket(payload: TicketCreate, user: dict[str, str] = Depends(get_curr
             apartment=task_data.get("apartment"),
             ai_comment=task_data.get("ai_comment"),
             source_ticket_id=ticket.id,
+            db=db,
         )
     else:
         # Fallback if Groq unavailable: create basic task from ticket
@@ -440,6 +475,7 @@ def create_ticket(payload: TicketCreate, user: dict[str, str] = Depends(get_curr
             apartment=apt_id,
             ai_comment=None,
             source_ticket_id=ticket.id,
+            db=db,
         )
 
     return ticket
@@ -449,17 +485,22 @@ def create_ticket(payload: TicketCreate, user: dict[str, str] = Depends(get_curr
 def list_tickets(
     house_id: str | None = Query(default=None),
     user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
 ) -> list[Ticket]:
     target_house = house_id or user["house_id"]
     _assert_house_access(user, target_house)
     if user["role"] == "Manager":
-        return store.list_tickets_for_manager(target_house)
-    return store.list_tickets_for_resident(user["id"])
+        return store.list_tickets_for_manager(target_house, db=db)
+    return store.list_tickets_for_resident(user["id"], db=db)
 
 
 @router.get("/tickets/{ticket_id}", response_model=Ticket)
-def get_ticket(ticket_id: str, user: dict[str, str] = Depends(get_current_user)) -> Ticket:
-    ticket = store.get_ticket(ticket_id)
+def get_ticket(
+    ticket_id: str,
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> Ticket:
+    ticket = store.get_ticket(ticket_id, db=db)
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ticket not found")
     if user["house_id"] != ticket.house_id:
@@ -470,8 +511,13 @@ def get_ticket(ticket_id: str, user: dict[str, str] = Depends(get_current_user))
 
 
 @router.patch("/tickets/{ticket_id}", response_model=Ticket)
-def update_ticket(ticket_id: str, payload: TicketUpdate, user: dict[str, str] = Depends(get_current_user)) -> Ticket:
-    ticket = store.get_ticket(ticket_id)
+def update_ticket(
+    ticket_id: str,
+    payload: TicketUpdate,
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> Ticket:
+    ticket = store.get_ticket(ticket_id, db=db)
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ticket not found")
     if user["house_id"] != ticket.house_id:
@@ -483,20 +529,25 @@ def update_ticket(ticket_id: str, payload: TicketUpdate, user: dict[str, str] = 
         status=payload.status or ticket.status,
         viewed_at=store.now_utc() if payload.status == "viewing" else ticket.viewed_at,
         decision=payload.decision,
+        db=db,
     )
     return updated or ticket
 
 
 @router.post("/tickets/{ticket_id}/view", response_model=Ticket)
-def view_ticket(ticket_id: str, user: dict[str, str] = Depends(get_current_user)) -> Ticket:
-    ticket = store.get_ticket(ticket_id)
+def view_ticket(
+    ticket_id: str,
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> Ticket:
+    ticket = store.get_ticket(ticket_id, db=db)
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ticket not found")
     if user["house_id"] != ticket.house_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
     if user["role"] != "Manager":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="only manager can mark as viewing")
-    updated = store.update_ticket_status(ticket_id, status="viewing", viewed_at=store.now_utc())
+    updated = store.update_ticket_status(ticket_id, status="viewing", viewed_at=store.now_utc(), db=db)
     return updated or ticket
 
 
@@ -505,8 +556,9 @@ def add_ticket_follow_up(
     ticket_id: str,
     payload: TicketFollowUpCreate,
     user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
 ) -> Ticket:
-    ticket = store.get_ticket(ticket_id)
+    ticket = store.get_ticket(ticket_id, db=db)
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ticket not found")
     if user["house_id"] != ticket.house_id:
@@ -519,5 +571,6 @@ def add_ticket_follow_up(
         author_name=user["full_name"],
         author_role=user["role"],
         text=payload.text,
+        db=db,
     )
     return updated or ticket

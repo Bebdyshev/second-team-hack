@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import random
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from src.housing.schemas import (
@@ -22,6 +23,9 @@ from src.housing.schemas import (
     TicketFollowUp,
 )
 from src.utils.auth_utils import hash_password, verify_password
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 _houses: dict[str, House] = {
@@ -314,12 +318,18 @@ def _seed_tasks() -> None:
         ))
 
 
-def list_tasks(house_id: str) -> list[Task]:
+def list_tasks(house_id: str, db: "Session | None" = None) -> list[Task]:
+    if db is not None:
+        from src.housing import store_db
+        return store_db.list_tasks_db(db, house_id)
     _seed_tasks()
     return [t for t in _tasks if t.house_id == house_id or t.house_id == "all"]
 
 
-def get_task(task_id: str) -> Task | None:
+def get_task(task_id: str, db: "Session | None" = None) -> Task | None:
+    if db is not None:
+        from src.housing import store_db
+        return store_db.get_task_db(db, task_id)
     _seed_tasks()
     for t in _tasks:
         if t.id == task_id:
@@ -338,7 +348,17 @@ def create_task(
     apartment: str | None = None,
     ai_comment: str | None = None,
     source_ticket_id: str | None = None,
+    db: "Session | None" = None,
 ) -> Task:
+    if db is not None:
+        from src.housing import store_db
+        hid = house_id or _resolve_house_id(building)
+        if building == "All buildings":
+            hid = "all"
+        return store_db.create_task_db(
+            db, title, description, building, category, priority, due_time, hid,
+            apartment=apartment, ai_comment=ai_comment, source_ticket_id=source_ticket_id,
+        )
     _seed_tasks()
     hid = house_id or _resolve_house_id(building)
     if building == "All buildings":
@@ -362,7 +382,17 @@ def create_task(
     return task
 
 
-def update_task(task_id: str, *, status: str | None = None, title: str | None = None, description: str | None = None) -> Task | None:
+def update_task(
+    task_id: str,
+    *,
+    status: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    db: "Session | None" = None,
+) -> Task | None:
+    if db is not None:
+        from src.housing import store_db
+        return store_db.update_task_db(db, task_id, status=status, title=title, description=description)
     task = get_task(task_id)
     if not task:
         return None
@@ -380,7 +410,10 @@ def update_task(task_id: str, *, status: str | None = None, title: str | None = 
     return _tasks[idx]
 
 
-def delete_task(task_id: str) -> bool:
+def delete_task(task_id: str, db: "Session | None" = None) -> bool:
+    if db is not None:
+        from src.housing import store_db
+        return store_db.delete_task_db(db, task_id)
     global _tasks
     _seed_tasks()
     for i, t in enumerate(_tasks):
@@ -406,7 +439,14 @@ def create_ticket(
     incident_date: str,
     incident_time: str,
     attachments: list[TicketAttachment],
+    db: "Session | None" = None,
 ) -> Ticket:
+    if db is not None:
+        from src.housing import store_db
+        return store_db.create_ticket_db(
+            db, house_id, resident_id, resident_name, resident_email, apartment_id,
+            subject, description, incident_date, incident_time, attachments,
+        )
     now = now_utc()
     ticket_id = f"ticket-{uuid4().hex[:12]}"
     ticket = {
@@ -432,24 +472,43 @@ def create_ticket(
     return Ticket(**ticket)
 
 
-def get_ticket(ticket_id: str) -> Ticket | None:
+def get_ticket(ticket_id: str, db: "Session | None" = None) -> Ticket | None:
+    if db is not None:
+        from src.housing import store_db
+        return store_db.get_ticket_db(db, ticket_id)
     for t in _tickets:
         if t["id"] == ticket_id:
             return Ticket(**t)
     return None
 
 
-def list_tickets_for_resident(resident_id: str) -> list[Ticket]:
+def list_tickets_for_resident(resident_id: str, db: "Session | None" = None) -> list[Ticket]:
+    if db is not None:
+        from src.housing import store_db
+        return store_db.list_tickets_for_resident_db(db, resident_id)
     items = [t for t in _tickets if t["resident_id"] == resident_id]
     return sorted([Ticket(**t) for t in items], key=lambda x: x.updated_at, reverse=True)
 
 
-def list_tickets_for_manager(house_id: str) -> list[Ticket]:
+def list_tickets_for_manager(house_id: str, db: "Session | None" = None) -> list[Ticket]:
+    if db is not None:
+        from src.housing import store_db
+        return store_db.list_tickets_for_manager_db(db, house_id)
     items = [t for t in _tickets if t["house_id"] == house_id]
     return sorted([Ticket(**t) for t in items], key=lambda x: x.updated_at, reverse=True)
 
 
-def add_follow_up(ticket_id: str, author_id: str, author_name: str, author_role: str, text: str) -> Ticket | None:
+def add_follow_up(
+    ticket_id: str,
+    author_id: str,
+    author_name: str,
+    author_role: str,
+    text: str,
+    db: "Session | None" = None,
+) -> Ticket | None:
+    if db is not None:
+        from src.housing import store_db
+        return store_db.add_follow_up_db(db, ticket_id, author_id, author_name, author_role, text)
     for t in _tickets:
         if t["id"] == ticket_id:
             now = now_utc()
@@ -467,7 +526,16 @@ def add_follow_up(ticket_id: str, author_id: str, author_name: str, author_role:
     return None
 
 
-def update_ticket_status(ticket_id: str, status: str, viewed_at: datetime | None = None, decision: str | None = None) -> Ticket | None:
+def update_ticket_status(
+    ticket_id: str,
+    status: str,
+    viewed_at: datetime | None = None,
+    decision: str | None = None,
+    db: "Session | None" = None,
+) -> Ticket | None:
+    if db is not None:
+        from src.housing import store_db
+        return store_db.update_ticket_status_db(db, ticket_id, status, viewed_at=viewed_at, decision=decision)
     for t in _tickets:
         if t["id"] == ticket_id:
             t["status"] = status

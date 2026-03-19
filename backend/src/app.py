@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.housing import router as housing_router
+from src.housing.db import init_housing_db
 
 
 ENABLE_PUBLIC_DOCS = os.getenv("ENABLE_PUBLIC_DOCS", "true").lower() == "true"
@@ -33,6 +34,11 @@ app.add_middleware(
 )
 
 app.include_router(housing_router)
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    init_housing_db()
 
 
 @app.get("/")

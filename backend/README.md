@@ -11,9 +11,19 @@ Backend migrated from LMS domain to residential building management.
 
 ```bash
 cd backend
-pip install -r requirements.txt
+source .venv/bin/activate  # or: venv\Scripts\activate on Windows
 uvicorn src.app:app --reload --port 8000
 ```
+
+## PostgreSQL (Tickets & Tasks)
+
+Tickets and daily tasks are persisted in PostgreSQL when `POSTGRES_URL` is set in `.env`. This enables:
+
+- Resident ticket history across devices
+- Task status (To Do / In Progress / Done) saved
+- Ticket–task sync (manager actions update resident tickets)
+
+If `POSTGRES_URL` is not set, the app falls back to in-memory storage (data lost on restart).
 
 ## Seed Users
 

@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,8 @@ type Store struct {
 	apartments   map[string]domain.Apartment
 	alerts       []domain.ResourceAlert
 	meters       []domain.MeterHealth
+	anchors      []domain.ReportAnchor
+	actionProofs []domain.ManagerActionProof
 }
 
 func New() *Store {
@@ -272,6 +275,94 @@ func (s *Store) GetMetersByHouseID(houseID string) []domain.MeterHealth {
 		}
 	}
 	return out
+}
+
+func (s *Store) FindReportAnchor(houseID string, period string, reportHash string) (domain.ReportAnchor, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, anchor := range s.anchors {
+		if anchor.HouseID == houseID && anchor.Period == period && anchor.ReportHash == reportHash {
+			return anchor, true
+		}
+	}
+	return domain.ReportAnchor{}, false
+}
+
+func (s *Store) UpsertReportAnchor(anchor domain.ReportAnchor) domain.ReportAnchor {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index := range s.anchors {
+		if s.anchors[index].ID == anchor.ID {
+			s.anchors[index] = anchor
+			return anchor
+		}
+	}
+
+	s.anchors = append(s.anchors, anchor)
+	return anchor
+}
+
+func (s *Store) ListReportAnchors(houseID string) []domain.ReportAnchor {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := make([]domain.ReportAnchor, 0)
+	for _, anchor := range s.anchors {
+		if houseID == "" || anchor.HouseID == houseID {
+			items = append(items, anchor)
+		}
+	}
+
+	slices.SortFunc(items, func(a, b domain.ReportAnchor) int {
+		return strings.Compare(b.CreatedAt, a.CreatedAt)
+	})
+	return items
+}
+
+func (s *Store) FindManagerActionProof(houseID string, actionHash string) (domain.ManagerActionProof, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, proof := range s.actionProofs {
+		if proof.HouseID == houseID && proof.ActionHash == actionHash {
+			return proof, true
+		}
+	}
+	return domain.ManagerActionProof{}, false
+}
+
+func (s *Store) UpsertManagerActionProof(proof domain.ManagerActionProof) domain.ManagerActionProof {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index := range s.actionProofs {
+		if s.actionProofs[index].ID == proof.ID {
+			s.actionProofs[index] = proof
+			return proof
+		}
+	}
+
+	s.actionProofs = append(s.actionProofs, proof)
+	return proof
+}
+
+func (s *Store) ListManagerActionProofs(houseID string) []domain.ManagerActionProof {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := make([]domain.ManagerActionProof, 0)
+	for _, proof := range s.actionProofs {
+		if houseID == "" || proof.HouseID == houseID {
+			items = append(items, proof)
+		}
+	}
+
+	slices.SortFunc(items, func(a, b domain.ManagerActionProof) int {
+		return strings.Compare(b.CreatedAt, a.CreatedAt)
+	})
+	return items
 }
 
 func randomBetween(rng *rand.Rand, min float64, max float64) float64 {

@@ -96,3 +96,47 @@ type AuthResponse struct {
 	TokenType    string      `json:"token_type"`
 	User         UserProfile `json:"user"`
 }
+
+type TxLifecycleStatus string
+
+const (
+	TxStatusPending   TxLifecycleStatus = "pending"
+	TxStatusConfirmed TxLifecycleStatus = "confirmed"
+	TxStatusFailed    TxLifecycleStatus = "failed"
+)
+
+type ReportAnchor struct {
+	ID              string            `json:"id"`
+	HouseID         string            `json:"house_id"`
+	Period          string            `json:"period"`
+	MetadataURI     string            `json:"metadata_uri"`
+	ReportHash      string            `json:"report_hash"`
+	TriggeredBy     string            `json:"triggered_by"`
+	Status          TxLifecycleStatus `json:"status"`
+	TxHash          string            `json:"tx_hash"`
+	BlockNumber     uint64            `json:"block_number"`
+	ChainID         int64             `json:"chain_id"`
+	ContractAddress string            `json:"contract_address"`
+	ExplorerURL     string            `json:"explorer_url"`
+	ErrorMessage    string            `json:"error_message"`
+	CreatedAt       string            `json:"created_at"`
+	UpdatedAt       string            `json:"updated_at"`
+}
+
+type ManagerActionProof struct {
+	ID              string            `json:"id"`
+	HouseID         string            `json:"house_id"`
+	ActionType      string            `json:"action_type"`
+	ActorID         string            `json:"actor_id"`
+	ActionHash      string            `json:"action_hash"`
+	TriggeredBy     string            `json:"triggered_by"`
+	Status          TxLifecycleStatus `json:"status"`
+	TxHash          string            `json:"tx_hash"`
+	BlockNumber     uint64            `json:"block_number"`
+	ChainID         int64             `json:"chain_id"`
+	ContractAddress string            `json:"contract_address"`
+	ExplorerURL     string            `json:"explorer_url"`
+	ErrorMessage    string            `json:"error_message"`
+	CreatedAt       string            `json:"created_at"`
+	UpdatedAt       string            `json:"updated_at"`
+}

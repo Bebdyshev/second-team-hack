@@ -29,6 +29,13 @@ Server runs on `:8000` by default.
 
 - `PORT` (default `8000`)
 - `JWT_SECRET` (default `dev-secret-change-me`)
+- `WEB3_RPC_URL` (testnet RPC URL)
+- `WEB3_CHAIN_ID` (testnet chain ID)
+- `WEB3_CONTRACT_ADDRESS` (`ProofRegistry` contract address)
+- `WEB3_SIGNER_PRIVATE_KEY` (server signer private key)
+- `WEB3_EXPLORER_BASE_URL` (explorer base URL, example `https://sepolia.etherscan.io`)
+- `WEB3_WAIT_FOR_RECEIPT` (default `true`)
+- `WEB3_RECEIPT_TIMEOUT_SECONDS` (default `45`)
 
 ## Seed users
 
@@ -54,6 +61,8 @@ Server runs on `:8000` by default.
 - `GET /houses/{houseID}/summary`
 - `GET /houses/{houseID}/dynamics?resource=electricity&period=24h`
 - `GET /houses/{houseID}/apartments` (Manager only)
+- `POST /houses/{houseID}/reports/anchor` (Manager only)
+- `GET /houses/{houseID}/reports/anchors`
 
 ### Apartment scope
 
@@ -64,3 +73,16 @@ Server runs on `:8000` by default.
 
 - `GET /alerts?house_id=house-1`
 - `GET /meters?house_id=house-1`
+
+### Web3 proof endpoints
+
+- `POST /manager-actions/prove` (Manager only)
+- `GET /manager-actions/proofs?house_id=house-1`
+
+## Web3 proof model
+
+This MVP uses server-attested proofing:
+- Backend hashes report/action payload with `sha256`
+- Backend sends transaction to `ProofRegistry` in public testnet
+- Backend stores `status`, `tx_hash`, `block_number`, `explorer_url`
+- Duplicate report anchor requests with same `house_id + period + report_hash` are idempotent

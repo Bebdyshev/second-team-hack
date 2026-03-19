@@ -13,6 +13,7 @@ from src.housing.schemas import (
     ReportAnchor,
     ResourceAlert,
     RoleName,
+    Task,
     UserProfile,
     Organization,
     Membership,
@@ -42,6 +43,102 @@ _meters: list[MeterHealth] = [
 _apartments: dict[str, Apartment] = {}
 _report_anchors: list[ReportAnchor] = []
 _manager_action_proofs: list[ManagerActionProof] = []
+_tasks: list[Task] = []
+
+
+def _seed_tasks() -> None:
+    if _tasks:
+        return
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    seed_data = [
+        ("t-1", "house-1", "Maple Residence", "Morning meter readings check", "Verify all electricity and water meters are syncing correctly.", "meter", "high", "todo", "09:00", None),
+        ("t-2", "house-2", "River Park", "Inspect gas valve — Section C", "Scheduled inspection of gas collector valve after last week's pressure anomaly report.", "inspection", "critical", "todo", "10:30", None),
+        ("t-3", "house-1", "Maple Residence", "Respond to water leak complaint", "Apt 502 reported damp spots on the ceiling.", "complaint", "high", "todo", "11:00", "apt-502"),
+        ("t-4", "house-1", "Maple Residence", "Replace water meter — Block B", "The water meter m-2 has been showing weak signal for 3 days.", "repair", "medium", "in_progress", "13:00", None),
+        ("t-5", "house-3", "Oak Gardens", "Calibrate heating sensors", "Annual calibration of the heating sensor array on floors 5-12.", "meter", "medium", "in_progress", "14:00", None),
+        ("t-6", "house-1", "All buildings", "Review weekly consumption report", "Compile and review aggregated consumption data.", "report", "low", "todo", "16:00", None),
+        ("t-7", "house-1", "Maple Residence", "Upload daily manager summary", "Publish short daily summary with completed maintenance.", "report", "medium", "todo", "15:00", None),
+        ("t-8", "house-3", "Oak Gardens", "Update elevator power baseline", "After last week's alert, the elevator power baseline needs to be recalculated.", "report", "low", "done", "08:00", None),
+        ("t-9", "house-2", "River Park", "Morning building walkthrough", "Visual inspection of common areas, parking, lobby.", "inspection", "low", "done", "07:30", None),
+    ]
+    for row in seed_data:
+        tid, hid, bld, title, desc, cat, pri, st, due, apt = row
+        _tasks.append(Task(
+            id=tid, title=title, description=desc, building=bld, house_id=hid,
+            category=cat, priority=pri, status=st, due_time=due, apartment=apt, created_at=today,
+        ))
+
+
+def _building_to_house_id(building: str) -> str:
+    for house in _houses.values():
+        if house.name == building:
+            return house.id
+    return "house-1"
+
+
+def list_tasks(house_id: str) -> list[Task]:
+    _seed_tasks()
+    return [t for t in _tasks if t.house_id == house_id or t.house_id == "all"]
+
+
+def list_tasks_all_houses(house_ids: list[str]) -> list[Task]:
+    _seed_tasks()
+    seen = set(house_ids) | {"all"}
+    return [t for t in _tasks if t.house_id in seen]
+
+
+def get_task(task_id: str) -> Task | None:
+    _seed_tasks()
+    for t in _tasks:
+        if t.id == task_id:
+            return t
+    return None
+
+
+def create_task(title: str, description: str, building: str, category: str, priority: str, due_time: str, apartment: str | None, house_id: str) -> Task:
+    _seed_tasks()
+    hid = house_id or _building_to_house_id(building)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    task = Task(
+        id=f"t-{uuid4().hex[:8]}",
+        title=title,
+        description=description or "",
+        building=building,
+        house_id=hid,
+        category=category,
+        priority=priority,
+        status="todo",
+        due_time=due_time,
+        apartment=apartment,
+        created_at=today,
+    )
+    _tasks.append(task)
+    return task
+
+
+def update_task(task_id: str, status: str | None = None, title: str | None = None, description: str | None = None) -> Task | None:
+    _seed_tasks()
+    for i, t in enumerate(_tasks):
+        if t.id == task_id:
+            data = t.model_dump()
+            if status is not None:
+                data["status"] = status
+            if title is not None:
+                data["title"] = title
+            if description is not None:
+                data["description"] = description
+            _tasks[i] = Task.model_validate(data)
+            return _tasks[i]
+    return None
+
+
+def delete_task(task_id: str) -> bool:
+    _seed_tasks()
+    for i, t in enumerate(_tasks):
+        if t.id == task_id:
+            _tasks.pop(i)
+            return True
+    return False
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -250,6 +347,109 @@ def add_action_proof(proof: ManagerActionProof) -> ManagerActionProof:
 
 def list_action_proofs(house_id: str) -> list[ManagerActionProof]:
     return sorted([item for item in _manager_action_proofs if item.house_id == house_id], key=lambda item: item.created_at, reverse=True)
+
+
+def _resolve_house_id(building: str) -> str:
+    for house in _houses.values():
+        if house.name == building:
+            return house.id
+    return "house-1"
+
+
+def _seed_tasks() -> None:
+    if _tasks:
+        return
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    seed_data = [
+        ("t-1", "Morning meter readings check", "Verify all electricity and water meters.", "Maple Residence", "meter", "high", "todo", "09:00"),
+        ("t-2", "Inspect gas valve — Section C", "Scheduled inspection of gas collector valve.", "River Park", "inspection", "critical", "todo", "10:30"),
+        ("t-3", "Respond to water leak complaint", "Apt 502 reported damp spots. Coordinate plumber.", "Maple Residence", "complaint", "high", "todo", "11:00"),
+        ("t-4", "Replace water meter — Block B", "The water meter m-2 has weak signal. Replace.", "Maple Residence", "repair", "medium", "in_progress", "13:00"),
+        ("t-5", "Calibrate heating sensors", "Annual calibration of heating sensor array.", "Oak Gardens", "meter", "medium", "in_progress", "14:00"),
+        ("t-6", "Review weekly consumption report", "Compile and review aggregated consumption data.", "All buildings", "report", "low", "todo", "16:00"),
+        ("t-7", "Upload daily manager summary", "Publish short daily summary.", "Maple Residence", "report", "medium", "todo", "15:00"),
+        ("t-8", "Update elevator power baseline", "Recalculate after last week's alert.", "Oak Gardens", "report", "low", "done", "08:00"),
+        ("t-9", "Morning building walkthrough", "Visual inspection of common areas.", "River Park", "inspection", "low", "done", "07:30"),
+    ]
+    for tid, title, desc, building, cat, prio, st, due in seed_data:
+        hid = "all" if building == "All buildings" else _resolve_house_id(building)
+        apt = "apt-502" if "502" in desc else None
+        _tasks.append(Task(
+            id=tid,
+            title=title,
+            description=desc,
+            building=building,
+            house_id=hid,
+            category=cat,
+            priority=prio,
+            status=st,
+            due_time=due,
+            apartment=apt,
+            created_at=today,
+        ))
+
+
+def list_tasks(house_id: str) -> list[Task]:
+    _seed_tasks()
+    return [t for t in _tasks if t.house_id == house_id or t.house_id == "all"]
+
+
+def get_task(task_id: str) -> Task | None:
+    _seed_tasks()
+    for t in _tasks:
+        if t.id == task_id:
+            return t
+    return None
+
+
+def create_task(title: str, description: str, building: str, category: str, priority: str, due_time: str, house_id: str, apartment: str | None = None) -> Task:
+    _seed_tasks()
+    hid = house_id or _resolve_house_id(building)
+    if building == "All buildings":
+        hid = "all"
+    task = Task(
+        id=f"t-{uuid4().hex[:8]}",
+        title=title,
+        description=description,
+        building=building,
+        house_id=hid,
+        category=category,
+        priority=priority,
+        status="todo",
+        due_time=due_time,
+        apartment=apartment,
+        created_at=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+    )
+    _tasks.append(task)
+    return task
+
+
+def update_task(task_id: str, *, status: str | None = None, title: str | None = None, description: str | None = None) -> Task | None:
+    task = get_task(task_id)
+    if not task:
+        return None
+    idx = next((i for i, t in enumerate(_tasks) if t.id == task_id), None)
+    if idx is None:
+        return None
+    data = task.model_dump()
+    if status is not None:
+        data["status"] = status
+    if title is not None:
+        data["title"] = title
+    if description is not None:
+        data["description"] = description
+    _tasks[idx] = Task(**data)
+    return _tasks[idx]
+
+
+def delete_task(task_id: str) -> bool:
+    global _tasks
+    _seed_tasks()
+    for i, t in enumerate(_tasks):
+        if t.id == task_id:
+            _tasks.pop(i)
+            return True
+    return False
 
 
 def now_utc() -> datetime:

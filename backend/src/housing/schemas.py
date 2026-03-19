@@ -166,3 +166,38 @@ class ProveActionRequest(BaseModel):
     action_type: str
     actor_id: str | None = None
     payload: dict[str, Any] | None = None
+
+
+TaskStatus = Literal["todo", "in_progress", "done"]
+TaskPriority = Literal["low", "medium", "high", "critical"]
+TaskCategory = Literal["inspection", "repair", "meter", "complaint", "report"]
+
+
+class Task(BaseModel):
+    id: str
+    title: str
+    description: str
+    building: str
+    house_id: str
+    category: TaskCategory
+    priority: TaskPriority
+    status: TaskStatus
+    due_time: str
+    apartment: str | None = None
+    created_at: str
+
+
+class CreateTaskRequest(BaseModel):
+    title: str
+    description: str = ""
+    building: str
+    house_id: str | None = None
+    category: TaskCategory = "inspection"
+    priority: TaskPriority = "medium"
+    due_time: str = "12:00"
+
+
+class UpdateTaskRequest(BaseModel):
+    status: TaskStatus | None = None
+    title: str | None = None
+    description: str | None = None

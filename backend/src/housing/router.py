@@ -4,12 +4,14 @@ from datetime import datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 
 from src.housing import store, web3
 from src.housing.schemas import (
     AnchorRequest,
     Apartment,
     AuthResponse,
+    CreateTaskRequest,
     DynamicsPoint,
     DynamicsResponse,
     House,
@@ -22,6 +24,8 @@ from src.housing.schemas import (
     ReportAnchor,
     ResourceAlert,
     MeterHealth,
+    Task,
+    UpdateTaskRequest,
     UserProfile,
 )
 from src.housing.security import get_current_user, issue_tokens_for_user, require_manager, verify_refresh_token_and_get_user
@@ -318,3 +322,55 @@ def manager_action_proofs(house_id: str | None = Query(default=None), user: dict
     target_house = house_id or user["house_id"]
     _assert_house_access(user, target_house)
     return store.list_action_proofs(target_house)
+
+
+@router.get("/tasks", response_model=list[Task])
+def list_tasks(house_id: str | None = Query(default=None), user: dict[str, str] = Depends(get_current_user)) -> list[Task]:
+    target_house = house_id or user["house_id"]
+    _assert_house_access(user, target_house)
+    return store.list_tasks(target_house)
+
+
+@router.post("/tasks", response_model=Task, status_code=201)
+def create_task(payload: CreateTaskRequest, user: dict[str, str] = Depends(require_manager)) -> Task:
+    house_id = payload.house_id or user["house_id"]
+    _assert_house_access(user, house_id)
+    return store.create_task(
+        title=payload.title,
+        description=payload.description,
+        building=payload.building,
+        category=payload.category,
+        priority=payload.priority,
+        due_time=payload.due_time,
+        house_id=house_id,
+    )
+
+
+@router.patch("/tasks/{task_id}", response_model=Task)
+def update_task(task_id: str, payload: UpdateTaskRequest, user: dict[str, str] = Depends(get_current_user)) -> Task:
+    task = store.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="task not found")
+    if task.house_id != "all" and task.house_id != user["house_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden for this task")
+
+    updated = store.update_task(
+        task_id,
+        status=payload.status,
+        title=payload.title,
+        description=payload.description,
+    )
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="task not found")
+    return updated
+
+
+@router.delete("/tasks/{task_id}", status_code=204)
+def delete_task_route(task_id: str, user: dict[str, str] = Depends(require_manager)) -> Response:
+    task = store.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="task not found")
+    if task.house_id != "all" and task.house_id != user["house_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden for this task")
+    store.delete_task(task_id)
+    return Response(status_code=204)

@@ -27,7 +27,7 @@ type NavItem = {
 const mainLinks: NavItem[] = [
   { href: '/dashboard', label: 'Overview', icon: FiGrid },
   { href: '/workspace-shell', label: 'Buildings', icon: FiHome },
-  { href: '/tasks-board', label: 'Consumption', icon: FiBarChart2 },
+  { href: '/tasks-board', label: 'Daily Tasks', icon: FiBarChart2 },
   { href: '/data-tables', label: 'Meters', icon: FiDatabase },
   { href: '/knowledge-base', label: 'Alerts', icon: FiAlertTriangle },
   { href: '/agents', label: 'Maintenance', icon: FiTool },

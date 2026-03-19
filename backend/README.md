@@ -1,33 +1,66 @@
-# Smart Home Resource Monitoring Backend Boilerplate
+# backend-go
 
-Clean FastAPI boilerplate for a residential building resource monitoring project.
+Go backend with role-based access for two roles:
+- `Manager` (управдом)
+- `Resident` (резидент)
 
-## Tech stack
-- FastAPI
-- Pydantic v2
-- PostgreSQL (prepared via Docker Compose)
-- SQLAlchemy (ready for persistence layer integration)
+## What was extracted from frontend
 
-## Local run
-1. Copy `.env.example` to `.env`
-2. Set `POSTGRES_PASSWORD` and verify `POSTGRES_URL`
-3. Start services:
-   - `docker compose up --build`
-4. Open API docs:
-   - `http://localhost:8000/docs`
+From the frontend modules and data model, both roles need:
+- authentication (`/auth/login`, `/auth/register`, `/auth/refresh`, `/auth/me`)
+- access to house-level overview and dynamics
+- access to alerts/meters/reporting data for their house
 
-## Included boilerplate endpoints
-- `GET /`
-- `GET /health`
-- `GET /api/v1/buildings`
-- `POST /api/v1/buildings`
-- `GET /api/v1/meters`
-- `POST /api/v1/meters`
-- `GET /api/v1/metrics`
-- `POST /api/v1/metrics`
-- `GET /api/v1/dashboard`
+Role restrictions implemented in API:
+- `Manager`: full access to all apartments inside assigned house
+- `Resident`: only own apartment details/dynamics, but house-level overview remains available
 
-## Project notes
-- Current storage is in-memory to keep the template simple
-- `POSTGRES_URL` is already available in settings for quick DB integration
-- `lifespan` hook is prepared for startup/shutdown resources
+## Run
+
+```bash
+cd backend-go
+go mod tidy
+go run ./cmd/api
+```
+
+Server runs on `:8000` by default.
+
+## Env vars
+
+- `PORT` (default `8000`)
+- `JWT_SECRET` (default `dev-secret-change-me`)
+
+## Seed users
+
+- Manager:
+  - email: `manager@resmonitor.kz`
+  - password: `manager123`
+- Resident:
+  - email: `resident@resmonitor.kz`
+  - password: `resident123`
+
+## API
+
+### Auth
+
+- `POST /auth/login`
+- `POST /auth/register`
+- `POST /auth/refresh`
+- `GET /auth/me`
+
+### House scope
+
+- `GET /houses`
+- `GET /houses/{houseID}/summary`
+- `GET /houses/{houseID}/dynamics?resource=electricity&period=24h`
+- `GET /houses/{houseID}/apartments` (Manager only)
+
+### Apartment scope
+
+- `GET /apartments/{apartmentID}/summary`
+- `GET /apartments/{apartmentID}/dynamics?resource=electricity&period=24h`
+
+### Operational feeds
+
+- `GET /alerts?house_id=house-1`
+- `GET /meters?house_id=house-1`

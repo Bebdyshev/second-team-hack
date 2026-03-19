@@ -10,10 +10,8 @@ import {
   useDroppable,
 } from '@dnd-kit/core'
 import {
-  FiArrowRight,
   FiChevronDown,
   FiFilter,
-  FiMove,
   FiPlus,
   FiTrash2,
 } from 'react-icons/fi'
@@ -78,8 +76,8 @@ const CATEGORY_CONFIG: Record<Category, { label: string }> = {
 
 const COLUMN_CONFIG: Record<Status, { title: string }> = {
   todo: { title: 'To Do' },
-  in_progress: { title: 'In Progress' }, // Manager clicks "Review" → moves here
-  done: { title: 'Done' }, // Manager clicks "Decision" → moves here
+  in_progress: { title: 'In Progress' },
+  done: { title: 'Done' },
 }
 
 const COLUMNS: Status[] = ['todo', 'in_progress', 'done']
@@ -123,25 +121,19 @@ const DroppableColumn = ({ status, children }: { status: Status; children: React
 
 type DraggableTaskCardProps = {
   task: Task
-  onMove: (id: string, status: Status) => void
   onDelete: (id: string) => void
 }
 
-const DraggableTaskCard = ({ task, onMove, onDelete }: DraggableTaskCardProps) => {
+const DraggableTaskCard = ({ task, onDelete }: DraggableTaskCardProps) => {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id })
   return (
-    <div ref={setNodeRef} className={`flex gap-1.5 ${isDragging ? 'opacity-40' : ''}`}>
-      <div
-        {...listeners}
-        {...attributes}
-        className='flex shrink-0 cursor-grab touch-none items-center justify-center self-center rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing'
-        aria-label='Drag to move'
-      >
-        <FiMove className='size-3.5' />
-      </div>
-      <div className='min-w-0 flex-1'>
-        <TaskCard task={task} onMove={onMove} onDelete={onDelete} />
-      </div>
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      className={`cursor-grab active:cursor-grabbing ${isDragging ? 'opacity-40' : ''}`}
+    >
+      <TaskCard task={task} onDelete={onDelete} />
     </div>
   )
 }
@@ -167,11 +159,6 @@ const TaskCardContent = ({ task, isOverlay }: TaskCardContentProps) => {
       </div>
       <h3 className='text-xs font-semibold text-slate-800'>{task.title}</h3>
       <p className='mt-1 line-clamp-2 text-[11px] leading-4 text-slate-500'>{task.description}</p>
-      {task.aiComment && (
-        <p className='mt-1 rounded bg-amber-50 px-1.5 py-1 text-[10px] leading-3.5 text-amber-800'>
-          AI: {task.aiComment}
-        </p>
-      )}
       <div className='mt-2 flex items-center gap-1.5'>
         <span className='rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600'>{task.building}</span>
         {task.apartment && (
@@ -408,7 +395,6 @@ const TasksBoardPage = () => {
                     <DraggableTaskCard
                       key={task.id}
                       task={task}
-                      onMove={handleMoveTask}
                       onDelete={handleDeleteTask}
                     />
                   ))}
@@ -433,26 +419,12 @@ export default TasksBoardPage
 
 type TaskCardProps = {
   task: Task
-  onMove: (id: string, status: Status) => void
   onDelete: (id: string) => void
 }
 
-const TaskCard = ({ task, onMove, onDelete }: TaskCardProps) => {
+const TaskCard = ({ task, onDelete }: TaskCardProps) => {
   const priorityCfg = PRIORITY_CONFIG[task.priority]
   const categoryCfg = CATEGORY_CONFIG[task.category]
-
-  const nextStatus: Status | null =
-    task.status === 'todo' ? 'in_progress' : task.status === 'in_progress' ? 'done' : null
-
-  const prevStatus: Status | null =
-    task.status === 'done' ? 'in_progress' : task.status === 'in_progress' ? 'todo' : null
-
-  const nextLabel =
-    nextStatus && task.sourceTicketId
-      ? (nextStatus === 'in_progress' ? 'Review' : nextStatus === 'done' ? 'Decision' : COLUMN_CONFIG[nextStatus].title)
-      : nextStatus
-        ? COLUMN_CONFIG[nextStatus].title
-        : ''
 
   return (
     <article className='group rounded-md bg-white p-2.5'>
@@ -471,40 +443,15 @@ const TaskCard = ({ task, onMove, onDelete }: TaskCardProps) => {
 
       <h3 className='text-xs font-semibold text-slate-800'>{task.title}</h3>
       <p className='mt-1 line-clamp-2 text-[11px] leading-4 text-slate-500'>{task.description}</p>
-      {task.aiComment && (
-        <p className='mt-1 rounded bg-amber-50 px-1.5 py-1 text-[10px] leading-3.5 text-amber-800'>
-          AI: {task.aiComment}
-        </p>
-      )}
+
       <div className='mt-2 flex items-center gap-1.5'>
         <span className='rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600'>{task.building}</span>
         {task.apartment && (
           <span className='rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600'>{task.apartment}</span>
         )}
       </div>
-      <div className='mt-2.5 flex items-center gap-1 pt-2' onPointerDown={(e) => e.stopPropagation()}>
-        {prevStatus && (
-          <button
-            type='button'
-            onClick={() => onMove(task.id, prevStatus)}
-            className='flex h-5 items-center gap-1 rounded bg-slate-100 px-1.5 text-[10px] text-slate-600 hover:bg-slate-200'
-            aria-label={`Move to ${COLUMN_CONFIG[prevStatus].title}`}
-          >
-            <FiArrowRight className='size-2.5 rotate-180' />
-            {COLUMN_CONFIG[prevStatus].title}
-          </button>
-        )}
-        {nextStatus && (
-          <button
-            type='button'
-            onClick={() => onMove(task.id, nextStatus)}
-            className='flex h-5 items-center gap-1 rounded bg-blue-50 px-1.5 text-[10px] text-blue-700 hover:bg-blue-100'
-            aria-label={`Move to ${COLUMN_CONFIG[nextStatus].title}`}
-          >
-            {nextLabel}
-            <FiArrowRight className='size-2.5' />
-          </button>
-        )}
+
+      <div className='mt-2.5 flex items-center justify-end pt-2'>
         <button
           type='button'
           onClick={() => onDelete(task.id)}

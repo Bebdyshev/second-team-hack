@@ -120,6 +120,16 @@ class MeterHealth(BaseModel):
     last_sync: str
 
 
+class NearbyService(BaseModel):
+    name: str
+    service_type: str
+    phone: str | None = None
+    distance_m: int | None = None
+    address: str | None = None
+    maps_url: str
+    whatsapp_url: str | None = None
+
+
 class ReportAnchor(BaseModel):
     id: str
     house_id: str

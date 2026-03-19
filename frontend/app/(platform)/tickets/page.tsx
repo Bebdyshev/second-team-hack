@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { FiCheck, FiEye, FiMessageCircle, FiPaperclip, FiPlus, FiSend, FiTrash2 } from 'react-icons/fi'
+import { FiAlertTriangle, FiCheck, FiEye, FiExternalLink, FiMapPin, FiMessageCircle, FiPaperclip, FiPhone, FiPlus, FiSend, FiTrash2 } from 'react-icons/fi'
 
 import { AppShell } from '@/components/app-shell'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,15 @@ import { apiRequest, ApiError } from '@/lib/api'
 type TicketAttachment = { name: string; url?: string }
 type TicketFollowUp = { id: string; text: string; author_id: string; author_name: string; author_role: string; created_at: string }
 type ComplaintType = 'neighbors' | 'water' | 'electricity' | 'schedule' | 'general' | 'recommendation'
+type NearbyService = {
+  name: string
+  service_type: string
+  phone: string | null
+  distance_m: number | null
+  maps_url: string
+  whatsapp_url: string | null
+}
+
 type Ticket = {
   id: string
   house_id: string
@@ -63,6 +72,22 @@ const complaintTypeColor: Record<ComplaintType, string> = {
   schedule: 'bg-indigo-100 text-indigo-700',
   general: 'bg-slate-100 text-slate-700',
   recommendation: 'bg-emerald-100 text-emerald-700',
+}
+
+const serviceTypeLabel: Record<string, string> = {
+  police: 'Police',
+  local_authority: 'Local Authority',
+  housing_office: 'Housing Office',
+  plumber: 'Plumber',
+  water_utility: 'Water Utility',
+  electrician: 'Electrician',
+  power_company: 'Power Company',
+}
+
+const isNightIncident = (incidentTime: string) => {
+  const hour = Number.parseInt(incidentTime.split(':')[0] || '', 10)
+  if (Number.isNaN(hour)) return false
+  return hour >= 23 || hour < 7
 }
 
 const TicketsPage = () => {
@@ -346,6 +371,9 @@ function TicketDetailModal({
   const [updatingStatus, setUpdatingStatus] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [decision, setDecision] = useState(ticket.decision ?? '')
+  const [nearbyServices, setNearbyServices] = useState<NearbyService[]>([])
+  const [loadingNearby, setLoadingNearby] = useState(false)
+  const [nearbyError, setNearbyError] = useState<string | null>(null)
 
   const handleView = async () => {
     if (!accessToken || !isManager) return
@@ -374,6 +402,32 @@ function TicketDetailModal({
   }
 
   const canDelete = !isManager && (ticket.status === 'sent' || ticket.status === 'viewing')
+
+  useEffect(() => {
+    if (!isManager || !accessToken) return
+
+    const ticketTags = ticket.complaint_types?.length ? ticket.complaint_types : ticket.complaint_type ? [ticket.complaint_type] : []
+    if (ticketTags.includes('recommendation')) {
+      setNearbyServices([])
+      setNearbyError(null)
+      return
+    }
+
+    const loadNearby = async () => {
+      setLoadingNearby(true)
+      setNearbyError(null)
+      try {
+        const data = await apiRequest<NearbyService[]>(`/tickets/${ticket.id}/nearby-services`, { token: accessToken })
+        setNearbyServices(data)
+      } catch (error) {
+        setNearbyError(error instanceof ApiError ? error.message : 'Failed to load nearby services')
+      } finally {
+        setLoadingNearby(false)
+      }
+    }
+
+    void loadNearby()
+  }, [accessToken, isManager, ticket.complaint_type, ticket.complaint_types, ticket.id])
 
   const handleDelete = async () => {
     if (!accessToken || !canDelete) return
@@ -460,6 +514,58 @@ function TicketDetailModal({
               <p className='mt-0.5'>{ticket.decision}</p>
             </div>
           )}
+          {isManager && !((ticket.complaint_types?.length ? ticket.complaint_types : ticket.complaint_type ? [ticket.complaint_type] : []).includes('recommendation')) && (
+            <div className='space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3'>
+              <div className='flex items-center justify-between gap-2'>
+                <p className='text-xs font-semibold text-slate-700'>Nearby Services</p>
+                {(ticket.complaint_types?.includes('neighbors') || ticket.complaint_type === 'neighbors') && isNightIncident(ticket.incident_time) && (
+                  <span className='inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700'>
+                    <FiAlertTriangle className='size-3' /> Late night noise: police advised
+                  </span>
+                )}
+              </div>
+
+              {loadingNearby ? (
+                <p className='text-xs text-slate-500'>Finding nearest services…</p>
+              ) : nearbyError ? (
+                <p className='text-xs text-rose-600'>{nearbyError}</p>
+              ) : nearbyServices.length === 0 ? (
+                <p className='text-xs text-slate-500'>No nearby services found for this complaint type.</p>
+              ) : (
+                <div className='space-y-2'>
+                  {nearbyServices.map((service, idx) => (
+                    <div key={`${service.service_type}-${service.name}-${idx}`} className='rounded-md border border-slate-200 bg-white p-2.5'>
+                      <div className='flex items-start justify-between gap-2'>
+                        <div>
+                          <p className='text-xs font-semibold text-slate-800'>{serviceTypeLabel[service.service_type] ?? service.service_type}</p>
+                          <p className='text-xs text-slate-600'>{service.name}</p>
+                          {service.distance_m !== null && (
+                            <p className='mt-0.5 text-[10px] text-slate-500'>~{service.distance_m} m away</p>
+                          )}
+                        </div>
+                        <div className='flex items-center gap-1'>
+                          {service.phone && (
+                            <a href={`tel:${service.phone}`} className='inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-[10px] text-slate-700 hover:bg-slate-50'>
+                              <FiPhone className='size-3' /> Call
+                            </a>
+                          )}
+                          {service.whatsapp_url && (
+                            <a href={service.whatsapp_url} target='_blank' rel='noreferrer' className='inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-[10px] text-slate-700 hover:bg-slate-50'>
+                              WhatsApp
+                            </a>
+                          )}
+                          <a href={service.maps_url} target='_blank' rel='noreferrer' className='inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-[10px] text-slate-700 hover:bg-slate-50'>
+                            <FiMapPin className='size-3' /> Map <FiExternalLink className='size-3' />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {isManager && ticket.status === 'sent' && (
             <Button onClick={handleView} disabled={updatingStatus} className='gap-2'>
               <FiEye className='size-4' />

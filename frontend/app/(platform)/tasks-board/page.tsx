@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -10,10 +10,15 @@ import {
   useDroppable,
 } from '@dnd-kit/core'
 import {
+  FiAlertTriangle,
   FiChevronDown,
+  FiExternalLink,
   FiFilter,
+  FiMapPin,
+  FiPhone,
   FiPlus,
   FiTrash2,
+  FiX,
 } from 'react-icons/fi'
 
 import { AppShell } from '@/components/app-shell'
@@ -62,6 +67,16 @@ type Task = {
   createdAt: string
 }
 
+type NearbyService = {
+  name: string
+  service_type: string
+  phone: string | null
+  distance_m: number | null
+  address: string | null
+  maps_url: string
+  whatsapp_url: string | null
+}
+
 const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; dot: string }> = {
   critical: { label: 'Critical', color: 'text-rose-700 bg-rose-50', dot: 'bg-rose-500' },
   high: { label: 'High', color: 'text-orange-700 bg-orange-50', dot: 'bg-orange-500' },
@@ -84,6 +99,22 @@ const COMPLAINT_TYPE_CONFIG: Record<ComplaintType, { label: string; color: strin
   schedule: { label: 'Schedule', color: 'text-indigo-700 bg-indigo-50' },
   general: { label: 'General', color: 'text-slate-700 bg-slate-100' },
   recommendation: { label: 'Recommendation', color: 'text-emerald-700 bg-emerald-50' },
+}
+
+const STATUS_CONFIG: Record<Status, { label: string; next: Status | null; nextLabel: string | null; color: string }> = {
+  todo: { label: 'To Do', next: 'in_progress', nextLabel: 'Start working', color: 'text-slate-600 bg-slate-100' },
+  in_progress: { label: 'In Progress', next: 'done', nextLabel: 'Mark done', color: 'text-blue-700 bg-blue-50' },
+  done: { label: 'Done', next: null, nextLabel: null, color: 'text-emerald-700 bg-emerald-50' },
+}
+
+const SERVICE_TYPE_LABEL: Record<string, string> = {
+  police: 'Police',
+  local_authority: 'Local Authority',
+  housing_office: 'Housing Office',
+  plumber: 'Plumber',
+  water_utility: 'Water Utility',
+  electrician: 'Electrician',
+  power_company: 'Power Company',
 }
 
 const COLUMN_CONFIG: Record<Status, { title: string }> = {
@@ -123,6 +154,267 @@ const mapApiTask = (t: ApiTask): Task => ({
   createdAt: t.created_at,
 })
 
+// ── Task Detail Sidebar ───────────────────────────────────────────────────────
+
+type GeoState = 'idle' | 'requesting' | 'granted' | 'denied' | 'unavailable'
+
+const TaskDetailSidebar = ({
+  task,
+  accessToken,
+  onClose,
+  onStatusChange,
+  onDelete,
+}: {
+  task: Task
+  accessToken: string | null
+  onClose: () => void
+  onStatusChange: (taskId: string, status: Status) => void
+  onDelete: (taskId: string) => void
+}) => {
+  const [nearbyServices, setNearbyServices] = useState<NearbyService[]>([])
+  const [loadingNearby, setLoadingNearby] = useState(false)
+  const [geoState, setGeoState] = useState<GeoState>('idle')
+  const statusCfg = STATUS_CONFIG[task.status]
+  const priorityCfg = PRIORITY_CONFIG[task.priority]
+  const categoryCfg = CATEGORY_CONFIG[task.category]
+  const tags = task.complaintTypes?.length ? task.complaintTypes : task.complaintType ? [task.complaintType] : []
+
+  const fetchNearbyServices = useCallback(async (lat?: number, lon?: number) => {
+    if (!task.sourceTicketId || !accessToken) return
+    setLoadingNearby(true)
+    try {
+      const params = lat != null && lon != null ? `?lat=${lat}&lon=${lon}` : ''
+      const data = await apiRequest<NearbyService[]>(
+        `/tickets/${task.sourceTicketId}/nearby-services${params}`,
+        { token: accessToken }
+      )
+      setNearbyServices(data)
+    } catch {
+      setNearbyServices([])
+    } finally {
+      setLoadingNearby(false)
+    }
+  }, [accessToken, task.sourceTicketId])
+
+  useEffect(() => {
+    if (!task.sourceTicketId || !accessToken) return
+    if (tags.includes('recommendation')) return
+
+    setGeoState('requesting')
+    setNearbyServices([])
+
+    if (!navigator.geolocation) {
+      setGeoState('unavailable')
+      void fetchNearbyServices()
+      return
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGeoState('granted')
+        void fetchNearbyServices(pos.coords.latitude, pos.coords.longitude)
+      },
+      () => {
+        setGeoState('denied')
+        void fetchNearbyServices()
+      },
+      { timeout: 8000, maximumAge: 60000 }
+    )
+  }, [task.id])
+
+  const handleAdvanceStatus = () => {
+    if (statusCfg.next) onStatusChange(task.id, statusCfg.next)
+  }
+
+  const handleDelete = () => {
+    onDelete(task.id)
+    onClose()
+  }
+
+  return (
+    <>
+      <div className='fixed inset-0 z-30 bg-black/20' onClick={onClose} aria-hidden='true' />
+      <aside className='fixed bottom-0 right-0 top-0 z-40 flex w-full max-w-sm flex-col border-l border-slate-200 bg-white shadow-xl'>
+        <div className='flex items-center justify-between border-b border-slate-200 px-4 py-3'>
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusCfg.color}`}>
+            {statusCfg.label}
+          </span>
+          <button
+            type='button'
+            onClick={onClose}
+            className='rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700'
+            aria-label='Close sidebar'
+          >
+            <FiX className='size-4' />
+          </button>
+        </div>
+
+        <div className='flex-1 overflow-y-auto px-4 py-4 space-y-5'>
+          <div>
+            <h2 className='text-base font-semibold text-slate-900 leading-snug'>{task.title}</h2>
+            <p className='mt-2 text-sm text-slate-600 leading-relaxed'>{task.description}</p>
+          </div>
+
+          <div className='grid grid-cols-2 gap-2 text-xs'>
+            <div className='rounded-lg border border-slate-100 bg-slate-50 px-3 py-2'>
+              <p className='text-[10px] text-slate-500 mb-0.5'>Priority</p>
+              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${priorityCfg.color}`}>
+                <span className={`size-1.5 rounded-full ${priorityCfg.dot}`} />
+                {priorityCfg.label}
+              </span>
+            </div>
+            <div className='rounded-lg border border-slate-100 bg-slate-50 px-3 py-2'>
+              <p className='text-[10px] text-slate-500 mb-0.5'>Category</p>
+              <span className='text-xs font-medium text-slate-700'>{categoryCfg.label}</span>
+            </div>
+            <div className='rounded-lg border border-slate-100 bg-slate-50 px-3 py-2'>
+              <p className='text-[10px] text-slate-500 mb-0.5'>Due time</p>
+              <span className='text-xs font-medium text-slate-700'>{task.dueTime}</span>
+            </div>
+            <div className='rounded-lg border border-slate-100 bg-slate-50 px-3 py-2'>
+              <p className='text-[10px] text-slate-500 mb-0.5'>Building</p>
+              <span className='text-xs font-medium text-slate-700 truncate block'>{task.building}</span>
+            </div>
+            {task.apartment && (
+              <div className='rounded-lg border border-slate-100 bg-slate-50 px-3 py-2'>
+                <p className='text-[10px] text-slate-500 mb-0.5'>Apartment</p>
+                <span className='text-xs font-medium text-blue-600'>{task.apartment}</span>
+              </div>
+            )}
+            <div className='rounded-lg border border-slate-100 bg-slate-50 px-3 py-2'>
+              <p className='text-[10px] text-slate-500 mb-0.5'>Created</p>
+              <span className='text-xs font-medium text-slate-700'>{task.createdAt}</span>
+            </div>
+          </div>
+
+          {tags.length > 0 && (
+            <div>
+              <p className='mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500'>Complaint type</p>
+              <div className='flex flex-wrap gap-1.5'>
+                {tags.map((tag) => (
+                  <span key={tag} className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${COMPLAINT_TYPE_CONFIG[tag].color}`}>
+                    {COMPLAINT_TYPE_CONFIG[tag].label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {task.aiComment && (
+            <div className='rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2.5'>
+              <p className='text-[10px] font-semibold uppercase tracking-wide text-indigo-500 mb-1'>AI suggestion</p>
+              <p className='text-xs text-indigo-800 leading-relaxed'>{task.aiComment}</p>
+            </div>
+          )}
+
+          {task.sourceTicketId && !tags.includes('recommendation') && (
+            <div>
+              <p className='mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500'>Nearby Services</p>
+
+              {geoState === 'requesting' && (
+                <p className='text-xs text-slate-400'>Определяем местоположение…</p>
+              )}
+
+              {(geoState === 'granted' || geoState === 'denied' || geoState === 'unavailable') && (
+                <>
+                  {geoState === 'denied' && (
+                    <p className='mb-2 text-[10px] text-amber-600'>Геолокация запрещена — поиск по адресу здания</p>
+                  )}
+                  {loadingNearby ? (
+                    <p className='text-xs text-slate-500'>Finding nearest services…</p>
+                  ) : nearbyServices.length === 0 ? (
+                    <p className='text-xs text-slate-400'>No nearby services found.</p>
+                  ) : (
+                    <div className='space-y-2'>
+                      {nearbyServices.map((service, idx) => (
+                        <div key={`${service.service_type}-${idx}`} className='rounded-lg border border-slate-200 bg-white p-2.5'>
+                          <div className='flex items-start justify-between gap-2'>
+                            <div className='min-w-0'>
+                              <p className='text-[10px] font-semibold text-slate-500'>
+                                {SERVICE_TYPE_LABEL[service.service_type] ?? service.service_type}
+                              </p>
+                              <p className='text-xs font-medium text-slate-800 truncate'>{service.name}</p>
+                              {service.address && (
+                                <p className='text-[10px] text-slate-500 mt-0.5 truncate'>{service.address}</p>
+                              )}
+                              {service.distance_m !== null && (
+                                <p className='text-[10px] text-slate-400 mt-0.5'>~{service.distance_m} m away</p>
+                              )}
+                            </div>
+                            <div className='flex shrink-0 items-center gap-1'>
+                              {service.phone && (
+                                <a
+                                  href={`tel:${service.phone}`}
+                                  className='inline-flex items-center gap-0.5 rounded border border-slate-200 px-1.5 py-1 text-[10px] text-slate-700 hover:bg-slate-50'
+                                  aria-label={`Call ${service.name}`}
+                                >
+                                  <FiPhone className='size-3' /> Call
+                                </a>
+                              )}
+                              {service.whatsapp_url && (
+                                <a
+                                  href={service.whatsapp_url}
+                                  target='_blank'
+                                  rel='noreferrer'
+                                  className='inline-flex items-center gap-0.5 rounded border border-slate-200 px-1.5 py-1 text-[10px] text-slate-700 hover:bg-slate-50'
+                                >
+                                  WA
+                                </a>
+                              )}
+                              <a
+                                href={service.maps_url}
+                                target='_blank'
+                                rel='noreferrer'
+                                className='inline-flex items-center gap-0.5 rounded border border-slate-200 px-1.5 py-1 text-[10px] text-slate-700 hover:bg-slate-50'
+                                aria-label={`Open map for ${service.name}`}
+                              >
+                                <FiMapPin className='size-3' />
+                                <FiExternalLink className='size-3' />
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {tags.includes('neighbors') && (
+            <div className='rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 flex items-start gap-2'>
+              <FiAlertTriangle className='mt-0.5 size-3.5 shrink-0 text-amber-600' />
+              <p className='text-xs text-amber-800'>If noise is after 23:00, police escalation is recommended.</p>
+            </div>
+          )}
+        </div>
+
+        <div className='border-t border-slate-200 px-4 py-3 space-y-2'>
+          {statusCfg.next && (
+            <button
+              type='button'
+              onClick={handleAdvanceStatus}
+              className='w-full rounded-lg bg-slate-900 py-2 text-sm font-medium text-white hover:bg-slate-800 transition-colors'
+            >
+              {statusCfg.nextLabel}
+            </button>
+          )}
+          <button
+            type='button'
+            onClick={handleDelete}
+            className='w-full rounded-lg border border-rose-200 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors'
+          >
+            Delete task
+          </button>
+        </div>
+      </aside>
+    </>
+  )
+}
+
+// ── Droppable column ──────────────────────────────────────────────────────────
+
 const DroppableColumn = ({ status, children }: { status: Status; children: React.ReactNode }) => {
   const { setNodeRef, isOver } = useDroppable({ id: status })
   return (
@@ -135,24 +427,51 @@ const DroppableColumn = ({ status, children }: { status: Status; children: React
   )
 }
 
+// ── Draggable card wrapper ────────────────────────────────────────────────────
+
 type DraggableTaskCardProps = {
   task: Task
   onDelete: (id: string) => void
+  onSelect: (task: Task) => void
 }
 
-const DraggableTaskCard = ({ task, onDelete }: DraggableTaskCardProps) => {
+const DraggableTaskCard = ({ task, onDelete, onSelect }: DraggableTaskCardProps) => {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id })
+  const pointerStart = useRef<{ x: number; y: number } | null>(null)
+  const didDrag = useRef(false)
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    pointerStart.current = { x: e.clientX, y: e.clientY }
+    didDrag.current = false
+  }
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!pointerStart.current) return
+    const dx = Math.abs(e.clientX - pointerStart.current.x)
+    const dy = Math.abs(e.clientY - pointerStart.current.y)
+    if (dx > 5 || dy > 5) didDrag.current = true
+  }
+
+  const handleClick = () => {
+    if (!didDrag.current) onSelect(task)
+  }
+
   return (
     <div
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={`cursor-grab active:cursor-grabbing ${isDragging ? 'opacity-40' : ''}`}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onClick={handleClick}
+      className={`cursor-pointer active:cursor-grabbing ${isDragging ? 'opacity-40' : ''}`}
     >
       <TaskCard task={task} onDelete={onDelete} />
     </div>
   )
 }
+
+// ── Overlay content (while dragging) ─────────────────────────────────────────
 
 type TaskCardContentProps = { task: Task; isOverlay?: boolean }
 
@@ -191,6 +510,8 @@ const TaskCardContent = ({ task, isOverlay }: TaskCardContentProps) => {
   )
 }
 
+// ── Main board page ───────────────────────────────────────────────────────────
+
 const TasksBoardPage = () => {
   const { accessToken, activeOrganizationId } = useAuth()
   const [tasks, setTasks] = useState<Task[]>([])
@@ -199,6 +520,7 @@ const TasksBoardPage = () => {
   const [filterComplaintType, setFilterComplaintType] = useState<ComplaintType | 'all'>('all')
   const [showNewTaskForm, setShowNewTaskForm] = useState(false)
   const [activeTask, setActiveTask] = useState<Task | null>(null)
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -235,17 +557,22 @@ const TasksBoardPage = () => {
   const handleMoveTask = useCallback(async (taskId: string, newStatus: Status) => {
     if (!accessToken) return
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t)))
+    if (selectedTask?.id === taskId) {
+      setSelectedTask((prev) => prev ? { ...prev, status: newStatus } : null)
+    }
     try {
       const updated = await apiRequest<ApiTask>(`/tasks/${taskId}`, {
         method: 'PATCH',
         token: accessToken,
         body: { status: newStatus },
       })
-      setTasks((prev) => prev.map((t) => (t.id === taskId ? mapApiTask(updated) : t)))
+      const mapped = mapApiTask(updated)
+      setTasks((prev) => prev.map((t) => (t.id === taskId ? mapped : t)))
+      if (selectedTask?.id === taskId) setSelectedTask(mapped)
     } catch {
       setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status: tasks.find((x) => x.id === taskId)!.status } : t)))
     }
-  }, [accessToken, tasks])
+  }, [accessToken, tasks, selectedTask])
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const task = tasks.find((t) => t.id === event.active.id)
@@ -265,12 +592,13 @@ const TasksBoardPage = () => {
   const handleDeleteTask = useCallback(async (taskId: string) => {
     if (!accessToken) return
     setTasks((prev) => prev.filter((t) => t.id !== taskId))
+    if (selectedTask?.id === taskId) setSelectedTask(null)
     try {
       await apiRequest(`/tasks/${taskId}`, { method: 'DELETE', token: accessToken })
     } catch {
       setTasks((prev) => [...prev, tasks.find((t) => t.id === taskId)!])
     }
-  }, [accessToken, tasks])
+  }, [accessToken, tasks, selectedTask])
 
   const handleAddTask = useCallback(async (task: Omit<Task, 'id' | 'createdAt'>) => {
     if (!accessToken) return
@@ -407,57 +735,70 @@ const TasksBoardPage = () => {
       {isLoading ? (
         <p className='py-8 text-center text-sm text-slate-500'>Loading tasks...</p>
       ) : (
-      <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div className='grid gap-2 lg:grid-cols-3'>
-          {COLUMNS.map((status) => {
-            const config = COLUMN_CONFIG[status]
-            const columnTasks = filteredTasks
-              .filter((t) => t.status === status)
-              .sort((a, b) => {
-                const priorityOrder: Record<Priority, number> = { critical: 0, high: 1, medium: 2, low: 3 }
-                return priorityOrder[a.priority] - priorityOrder[b.priority] || a.dueTime.localeCompare(b.dueTime)
-              })
+        <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <div className='grid gap-2 lg:grid-cols-3'>
+            {COLUMNS.map((status) => {
+              const config = COLUMN_CONFIG[status]
+              const columnTasks = filteredTasks
+                .filter((t) => t.status === status)
+                .sort((a, b) => {
+                  const priorityOrder: Record<Priority, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+                  return priorityOrder[a.priority] - priorityOrder[b.priority] || a.dueTime.localeCompare(b.dueTime)
+                })
 
-            const count = status === 'todo' ? todoCount : status === 'in_progress' ? inProgressCount : doneCount
+              const count = status === 'todo' ? todoCount : status === 'in_progress' ? inProgressCount : doneCount
 
-            return (
-              <div key={status} className='rounded-lg'>
-                <div className='flex items-center justify-between px-3 py-2'>
-                  <div className='flex items-center gap-2'>
-                    <h2 className='text-xs font-semibold text-slate-800'>{config.title}</h2>
-                    <span className='rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600'>{count}</span>
+              return (
+                <div key={status} className='rounded-lg'>
+                  <div className='flex items-center justify-between px-3 py-2'>
+                    <div className='flex items-center gap-2'>
+                      <h2 className='text-xs font-semibold text-slate-800'>{config.title}</h2>
+                      <span className='rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600'>{count}</span>
+                    </div>
                   </div>
+
+                  <DroppableColumn status={status}>
+                    {columnTasks.length === 0 && (
+                      <p className='py-4 text-center text-xs text-slate-400'>No tasks</p>
+                    )}
+                    {columnTasks.map((task) => (
+                      <DraggableTaskCard
+                        key={task.id}
+                        task={task}
+                        onDelete={handleDeleteTask}
+                        onSelect={setSelectedTask}
+                      />
+                    ))}
+                  </DroppableColumn>
                 </div>
+              )
+            })}
+          </div>
 
-                <DroppableColumn status={status}>
-                  {columnTasks.length === 0 && (
-                    <p className='py-4 text-center text-xs text-slate-400'>No tasks</p>
-                  )}
-                  {columnTasks.map((task) => (
-                    <DraggableTaskCard
-                      key={task.id}
-                      task={task}
-                      onDelete={handleDeleteTask}
-                    />
-                  ))}
-                </DroppableColumn>
-              </div>
-            )
-          })}
-        </div>
+          <DragOverlay>
+            {activeTask ? (
+              <TaskCardContent task={activeTask} isOverlay />
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      )}
 
-        <DragOverlay>
-          {activeTask ? (
-            <TaskCardContent task={activeTask} isOverlay />
-          ) : null}
-        </DragOverlay>
-      </DndContext>
+      {selectedTask && (
+        <TaskDetailSidebar
+          task={selectedTask}
+          accessToken={accessToken}
+          onClose={() => setSelectedTask(null)}
+          onStatusChange={handleMoveTask}
+          onDelete={handleDeleteTask}
+        />
       )}
     </AppShell>
   )
 }
 
 export default TasksBoardPage
+
+// ── Task card (inside draggable wrapper) ─────────────────────────────────────
 
 type TaskCardProps = {
   task: Task
@@ -467,12 +808,12 @@ type TaskCardProps = {
 const TaskCard = ({ task, onDelete }: TaskCardProps) => {
   const priorityCfg = PRIORITY_CONFIG[task.priority]
   const categoryCfg = CATEGORY_CONFIG[task.category]
-  const complaintTypeCfg = task.complaintType ? COMPLAINT_TYPE_CONFIG[task.complaintType] : null
+  const tags = task.complaintTypes?.length ? task.complaintTypes : task.complaintType ? [task.complaintType] : []
 
   return (
-    <article className='group rounded-md bg-white p-2.5'>
+    <article className='group rounded-md bg-white p-2.5 ring-0 hover:ring-1 hover:ring-slate-200 transition-shadow'>
       <div className='mb-1.5 flex items-start justify-between gap-1.5'>
-        <div className='flex items-center gap-1.5'>
+        <div className='flex flex-wrap items-center gap-1.5'>
           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${priorityCfg.color}`}>
             <span className={`size-1.5 rounded-full ${priorityCfg.dot}`} />
             {priorityCfg.label}
@@ -480,11 +821,11 @@ const TaskCard = ({ task, onDelete }: TaskCardProps) => {
           <span className='inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600'>
             {categoryCfg.label}
           </span>
-          {complaintTypeCfg && (
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${complaintTypeCfg.color}`}>
-              {complaintTypeCfg.label}
+          {tags.map((tag) => (
+            <span key={tag} className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${COMPLAINT_TYPE_CONFIG[tag].color}`}>
+              {COMPLAINT_TYPE_CONFIG[tag].label}
             </span>
-          )}
+          ))}
         </div>
         <span className='shrink-0 text-[10px] font-medium text-slate-400'>{task.dueTime}</span>
       </div>
@@ -502,7 +843,7 @@ const TaskCard = ({ task, onDelete }: TaskCardProps) => {
       <div className='mt-2.5 flex items-center justify-end'>
         <button
           type='button'
-          onClick={() => onDelete(task.id)}
+          onClick={(e) => { e.stopPropagation(); onDelete(task.id) }}
           className='ml-auto flex size-5 items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600'
           aria-label='Delete task'
         >
@@ -512,6 +853,8 @@ const TaskCard = ({ task, onDelete }: TaskCardProps) => {
     </article>
   )
 }
+
+// ── New task form ─────────────────────────────────────────────────────────────
 
 type NewTaskFormProps = {
   buildings: string[]

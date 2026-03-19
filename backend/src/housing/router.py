@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 
 from src.housing import gemini_client, store, web3
+from src.housing.geo_services import find_nearby, geocode_address
 from src.housing.schemas import (
     AnchorRequest,
     Apartment,
@@ -25,6 +26,7 @@ from src.housing.schemas import (
     ReportAnchor,
     ResourceAlert,
     MeterHealth,
+    NearbyService,
     Task,
     UpdateTaskRequest,
     UserProfile,
@@ -52,6 +54,40 @@ def _assert_apartment_access(user: dict[str, str], apartment: Apartment) -> None
         return
     if user["apartment_id"] != apartment.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden for this apartment")
+
+
+def _is_night_incident(incident_time: str) -> bool:
+    try:
+        hour = int(incident_time.split(":", 1)[0])
+    except (ValueError, IndexError):
+        return False
+    return hour >= 23 or hour < 7
+
+
+def _resolve_escalation_services(complaint_tags: list[str], incident_time: str) -> list[str]:
+    if not complaint_tags:
+        return ["housing_office"]
+
+    if "recommendation" in complaint_tags:
+        return []
+
+    if "neighbors" in complaint_tags:
+        if _is_night_incident(incident_time):
+            return ["police"]
+        return ["police", "local_authority"]
+
+    service_types: list[str] = []
+    if "water" in complaint_tags:
+        service_types.extend(["plumber", "water_utility"])
+    if "electricity" in complaint_tags:
+        service_types.extend(["electrician", "power_company"])
+    if "schedule" in complaint_tags:
+        service_types.extend(["local_authority", "housing_office"])
+    if "general" in complaint_tags:
+        service_types.append("housing_office")
+
+    deduped = [item for item in dict.fromkeys(service_types)]
+    return deduped or ["housing_office"]
 
 
 @router.post("/auth/login", response_model=AuthResponse)
@@ -552,6 +588,59 @@ def get_ticket(
     if user["role"] == "Resident" and user["id"] != ticket.resident_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
     return ticket
+
+
+@router.get("/tickets/{ticket_id}/nearby-services", response_model=list[NearbyService])
+def get_ticket_nearby_services(
+    ticket_id: str,
+    radius_m: int = Query(default=2500, ge=500, le=10000),
+    lat: float | None = Query(default=None),
+    lon: float | None = Query(default=None),
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> list[NearbyService]:
+    ticket = store.get_ticket(ticket_id, db=db)
+    if ticket is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ticket not found")
+
+    if user["house_id"] != ticket.house_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+
+    if user["role"] == "Resident" and user["id"] != ticket.resident_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+
+    complaint_tags = ticket.complaint_types if ticket.complaint_types else ([ticket.complaint_type] if ticket.complaint_type else [])
+    service_types = _resolve_escalation_services(complaint_tags, ticket.incident_time)
+    if not service_types:
+        return []
+
+    # Use browser-provided coordinates if available, otherwise geocode the building address
+    coordinates: tuple[float, float] | None = None
+    if lat is not None and lon is not None:
+        coordinates = (lat, lon)
+        logger.info(
+            "ticket_geo_using_client_coords ticket_id=%s lat=%.5f lon=%.5f",
+            ticket_id,
+            lat,
+            lon,
+        )
+    else:
+        house = store.get_house(ticket.house_id)
+        if house is None:
+            return []
+        coordinates = geocode_address(house.address)
+        if not coordinates:
+            logger.warning(
+                "ticket_geo_lookup_failed reason=address_not_geocoded ticket_id=%s house_id=%s address=%r",
+                ticket.id,
+                ticket.house_id,
+                house.address,
+            )
+            return []
+
+    search_lat, search_lon = coordinates
+    services = find_nearby(search_lat, search_lon, service_types, radius_m=radius_m)
+    return [NearbyService(**item) for item in services]
 
 
 @router.patch("/tickets/{ticket_id}", response_model=Ticket)

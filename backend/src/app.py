@@ -39,6 +39,8 @@ app.include_router(housing_router)
 @app.on_event("startup")
 def on_startup() -> None:
     init_housing_db()
+    from src.housing.geo_services import clear_nearby_cache
+    clear_nearby_cache()
 
 
 @app.get("/")

@@ -29,9 +29,9 @@ if TYPE_CHECKING:
 
 
 _houses: dict[str, House] = {
-    "house-1": House(id="house-1", name="Maple Residence", address="12 Maple Street", units_count=42, occupancy_rate=94, manager="Olivia Smith"),
-    "house-2": House(id="house-2", name="River Park", address="88 River Avenue", units_count=60, occupancy_rate=89, manager="Lucas Martin"),
-    "house-3": House(id="house-3", name="Oak Gardens", address="31 Oak Lane", units_count=28, occupancy_rate=96, manager="Emma Wilson"),
+    "house-1": House(id="house-1", name="Maple Residence", address="Достык 97, Алматы, Казахстан", units_count=42, occupancy_rate=94, manager="Olivia Smith"),
+    "house-2": House(id="house-2", name="River Park", address="Абая 44, Алматы, Казахстан", units_count=60, occupancy_rate=89, manager="Lucas Martin"),
+    "house-3": House(id="house-3", name="Oak Gardens", address="Сатпаева 22, Алматы, Казахстан", units_count=28, occupancy_rate=96, manager="Emma Wilson"),
 }
 
 _alerts: list[ResourceAlert] = [

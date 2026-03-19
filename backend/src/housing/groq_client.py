@@ -5,15 +5,19 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import dotenv_values
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemma-3-1b-it")
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3-32b")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 logger = logging.getLogger(__name__)
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+ENV_VALUES = dotenv_values(ENV_FILE)
 
 TASK_TRANSFORM_SYSTEM = """You are a building manager assistant. Convert a resident's ticket/request into a structured daily task card.
 
@@ -58,7 +62,7 @@ GEMINI_RESPONSE_SCHEMA: dict[str, Any] = {
         "category": {"type": "STRING", "enum": ["inspection", "repair", "meter", "complaint", "report"]},
         "priority": {"type": "STRING", "enum": ["low", "medium", "high", "critical"]},
         "building": {"type": "STRING"},
-        "apartment": {"type": "STRING", "nullable": True},
+        "apartment": {"type": "STRING"},
         "due_time": {"type": "STRING"},
         "ai_comment": {"type": "STRING"},
         "complaint_type": {"type": "STRING", "enum": ["neighbors", "water", "electricity", "schedule", "general", "recommendation"]},
@@ -71,20 +75,33 @@ GEMINI_RESPONSE_SCHEMA: dict[str, Any] = {
         "priority",
         "building",
         "due_time",
-        "ai_comment",
         "complaint_type",
-        "classification_reason",
     ],
 }
 
 
+def _extract_gemini_text(data: dict[str, Any]) -> str:
+    return (
+        ((data.get("candidates") or [{}])[0].get("content") or {})
+        .get("parts") or [{}]
+    )[0].get("text", "")
+
+
 def _call_gemini_structured(system_prompt: str, user_prompt: str, api_key: str) -> str:
-    with httpx.Client(timeout=30.0) as client:
-        response = client.post(
-            GEMINI_API_URL.format(model=GEMINI_MODEL),
-            params={"key": api_key},
-            headers={"Content-Type": "application/json"},
-            json={
+    """Try progressively simpler Gemini request variants until one succeeds.
+
+    Attempt order (most capable → most compatible):
+    1. system_instruction + responseSchema + json_mime
+    2. system_instruction + json_mime (no schema)
+    3. merged_prompt + json_mime (no system_instruction)
+    4. merged_prompt + plain_text  ← works on gemma-3-1b-it
+    """
+    merged = f"{system_prompt}\n\n{user_prompt}"
+
+    attempts: list[tuple[str, dict[str, Any]]] = [
+        (
+            "system_instruction+schema+json_mime",
+            {
                 "system_instruction": {"parts": [{"text": system_prompt}]},
                 "contents": [{"parts": [{"text": user_prompt}]}],
                 "generationConfig": {
@@ -93,10 +110,57 @@ def _call_gemini_structured(system_prompt: str, user_prompt: str, api_key: str) 
                     "responseSchema": GEMINI_RESPONSE_SCHEMA,
                 },
             },
-        )
-        response.raise_for_status()
-        data = response.json()
-        return (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [{}])[0].get("text", "")
+        ),
+        (
+            "system_instruction+json_mime",
+            {
+                "system_instruction": {"parts": [{"text": system_prompt}]},
+                "contents": [{"parts": [{"text": user_prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "responseMimeType": "application/json",
+                },
+            },
+        ),
+        (
+            "merged_prompt+json_mime",
+            {
+                "contents": [{"parts": [{"text": merged}]}],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "responseMimeType": "application/json",
+                },
+            },
+        ),
+        (
+            "merged_prompt+plain_text",
+            {
+                "contents": [{"parts": [{"text": merged}]}],
+                "generationConfig": {"temperature": 0.2},
+            },
+        ),
+    ]
+
+    url = GEMINI_API_URL.format(model=GEMINI_MODEL)
+    params = {"key": api_key}
+    headers = {"Content-Type": "application/json"}
+
+    with httpx.Client(timeout=30.0) as client:
+        for label, payload in attempts:
+            logger.info("ticket_ai_gemini_attempt attempt=%s", label)
+            response = client.post(url, params=params, headers=headers, json=payload)
+            if response.status_code < 400:
+                logger.info("ticket_ai_gemini_attempt_success attempt=%s", label)
+                return _extract_gemini_text(response.json())
+            logger.warning(
+                "ticket_ai_gemini_attempt_failed attempt=%s status=%s body=%s",
+                label,
+                response.status_code,
+                response.text[:400],
+            )
+
+    response.raise_for_status()
+    return ""
 
 
 def _call_groq(system_prompt: str, user_prompt: str, api_key: str) -> str:
@@ -138,8 +202,8 @@ def transform_ticket_to_task(
         building_name,
     )
 
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    groq_api_key = os.getenv("GROQ_API_KEY")
+    gemini_api_key = os.getenv("GEMINI_API_KEY") or ENV_VALUES.get("GEMINI_API_KEY")
+    groq_api_key = os.getenv("GROQ_API_KEY") or ENV_VALUES.get("GROQ_API_KEY")
     if not gemini_api_key and not groq_api_key:
         logger.warning("ticket_ai_classification_skip reason=missing_ai_api_keys expected=GEMINI_API_KEY_or_GROQ_API_KEY")
         return None
@@ -191,18 +255,36 @@ Convert to task JSON."""
         )
         complaint_type = "general"
 
-    # Keyword fallback: if subject/description clearly indicate neighbors, override
+    # Keyword override: catches cases where small model misclassifies
     combined = f"{subject} {description}".lower()
-    has_neighbor_signal = any(
-        k in combined
-        for k in ("neighbor", "neighbour", "noise", "loud", "screaming", "shouting", "clapping", "music", "party", "apartment above", "apartment below")
-    )
-    if has_neighbor_signal:
-        logger.info(
-            "ticket_ai_keyword_override from=%s to=neighbors reason=neighbor_keyword_match",
-            complaint_type,
-        )
-        complaint_type = "neighbors"
+    _KEYWORD_RULES: list[tuple[str, list[str]]] = [
+        ("neighbors", ["neighbor", "neighbour", "noise", "loud", "screaming", "shouting",
+                       "clapping", "music", "party", "smoking", "apartment above",
+                       "apartment below", "next door", "сосед", "шум", "громк", "кричит",
+                       "музыка", "вечеринка", "курит"]),
+        ("water",     ["water leak", "leak", "pipe", "plumbing", "flood", "dripping",
+                       "low pressure", "no water", "hot water", "протечка", "вода",
+                       "труба", "кран", "затопил", "нет воды", "давление воды"]),
+        ("electricity", ["electricity", "electric", "power outage", "no power", "blackout",
+                         "flickering", "breaker", "fuse", "outlet", "socket",
+                         "свет", "электричество", "отключил", "нет света", "мигает",
+                         "пробки", "розетка"]),
+        ("schedule",  ["schedule", "heating schedule", "no heating", "no heat",
+                       "cleaning schedule", "maintenance schedule", "горячее не дают",
+                       "расписание", "отопление", "не топят", "уборка по графику"]),
+        ("recommendation", ["recommend", "suggest", "proposal", "improvement", "idea",
+                            "рекоменд", "предлагаю", "предложение", "улучшение"]),
+    ]
+    for kw_type, keywords in _KEYWORD_RULES:
+        if any(k in combined for k in keywords):
+            if complaint_type != kw_type:
+                logger.info(
+                    "ticket_ai_keyword_override from=%s to=%s reason=keyword_match",
+                    complaint_type,
+                    kw_type,
+                )
+                complaint_type = kw_type
+            break
 
     logger.info(
         "ticket_ai_decision complaint_type=%s category=%s priority=%s reason=%r",

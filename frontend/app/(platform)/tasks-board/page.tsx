@@ -42,6 +42,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { NearbyServicesMap, get2gisSearchUrl } from '@/components/nearby-services-map'
 import { useAuth } from '@/context/auth-context'
 import { apiRequest, ApiError } from '@/lib/api'
 
@@ -73,7 +74,10 @@ type NearbyService = {
   phone: string | null
   distance_m: number | null
   address: string | null
+  lat?: number | null
+  lon?: number | null
   maps_url: string
+  maps_2gis_url?: string | null
   whatsapp_url: string | null
 }
 
@@ -115,6 +119,9 @@ const SERVICE_TYPE_LABEL: Record<string, string> = {
   water_utility: 'Water Utility',
   electrician: 'Electrician',
   power_company: 'Power Company',
+  service: 'Place',
+  restaurant: 'Restaurant',
+  cafe: 'Cafe',
 }
 
 const COLUMN_CONFIG: Record<Status, { title: string }> = {
@@ -179,22 +186,32 @@ const TaskDetailSidebar = ({
   const categoryCfg = CATEGORY_CONFIG[task.category]
   const tags = task.complaintTypes?.length ? task.complaintTypes : task.complaintType ? [task.complaintType] : []
 
+  const [nearbyCenter, setNearbyCenter] = useState<{ lat: number; lon: number } | null>(null)
+  const [nearbySearchQuery, setNearbySearchQuery] = useState<string>('сантехник')
+
   const fetchNearbyServices = useCallback(async (lat?: number, lon?: number) => {
     if (!task.sourceTicketId || !accessToken) return
     setLoadingNearby(true)
     try {
       const params = lat != null && lon != null ? `?lat=${lat}&lon=${lon}` : ''
-      const data = await apiRequest<NearbyService[]>(
+      const data = await apiRequest<{ services: NearbyService[]; center_lat?: number; center_lon?: number; search_query?: string }>(
         `/tickets/${task.sourceTicketId}/nearby-services${params}`,
         { token: accessToken }
       )
-      setNearbyServices(data)
+      setNearbyServices(data.services ?? [])
+      if (data.center_lat != null && data.center_lon != null) {
+        setNearbyCenter({ lat: data.center_lat, lon: data.center_lon })
+      } else {
+        setNearbyCenter(null)
+      }
+      setNearbySearchQuery(data.search_query ?? (tags.includes('water') ? 'сантехник' : tags.includes('electricity') ? 'электрик' : tags.includes('neighbors') ? 'полиция' : 'ЖКХ'))
     } catch {
       setNearbyServices([])
+      setNearbyCenter(null)
     } finally {
       setLoadingNearby(false)
     }
-  }, [accessToken, task.sourceTicketId])
+  }, [accessToken, task.sourceTicketId, tags])
 
   useEffect(() => {
     if (!task.sourceTicketId || !accessToken) return
@@ -322,9 +339,32 @@ const TaskDetailSidebar = ({
                   )}
                   {loadingNearby ? (
                     <p className='text-xs text-slate-500'>Finding nearest services…</p>
-                  ) : nearbyServices.length === 0 ? (
-                    <p className='text-xs text-slate-400'>No nearby services found.</p>
                   ) : (
+                    <>
+                      {nearbyCenter && (
+                        <NearbyServicesMap
+                          centerLat={nearbyCenter.lat}
+                          centerLon={nearbyCenter.lon}
+                          services={nearbyServices}
+                          buildingName={task.building}
+                          searchQuery={nearbySearchQuery}
+                        />
+                      )}
+                      {nearbyServices.length === 0 ? (
+                        <div className='space-y-1.5'>
+                          <p className='text-xs text-slate-400'>No nearby services found. Search on 2GIS for local results.</p>
+                          {nearbyCenter && (
+                            <a
+                              href={get2gisSearchUrl(nearbySearchQuery, nearbyCenter.lat, nearbyCenter.lon)}
+                              target='_blank'
+                              rel='noreferrer'
+                              className='inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50'
+                            >
+                              <FiMapPin className='size-3' /> Search on 2GIS
+                            </a>
+                          )}
+                        </div>
+                      ) : (
                     <div className='space-y-2'>
                       {nearbyServices.map((service, idx) => (
                         <div key={`${service.service_type}-${idx}`} className='rounded-lg border border-slate-200 bg-white p-2.5'>
@@ -366,16 +406,28 @@ const TaskDetailSidebar = ({
                                 target='_blank'
                                 rel='noreferrer'
                                 className='inline-flex items-center gap-0.5 rounded border border-slate-200 px-1.5 py-1 text-[10px] text-slate-700 hover:bg-slate-50'
-                                aria-label={`Open map for ${service.name}`}
+                                aria-label={`Google Maps for ${service.name}`}
                               >
-                                <FiMapPin className='size-3' />
-                                <FiExternalLink className='size-3' />
+                                <FiMapPin className='size-3' /> G
                               </a>
+                              {service.maps_2gis_url && (
+                                <a
+                                  href={service.maps_2gis_url}
+                                  target='_blank'
+                                  rel='noreferrer'
+                                  className='inline-flex items-center gap-0.5 rounded border border-slate-200 px-1.5 py-1 text-[10px] text-slate-700 hover:bg-slate-50'
+                                  aria-label={`2GIS for ${service.name}`}
+                                >
+                                  2GIS
+                                </a>
+                              )}
                             </div>
                           </div>
                         </div>
                       ))}
                     </div>
+                      )}
+                    </>
                   )}
                 </>
               )}

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { FiAlertTriangle, FiCheck, FiEye, FiExternalLink, FiMapPin, FiMessageCircle, FiPaperclip, FiPhone, FiPlus, FiSend, FiTrash2 } from 'react-icons/fi'
 
 import { AppShell } from '@/components/app-shell'
+import { NearbyServicesMap, get2gisSearchUrl } from '@/components/nearby-services-map'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/context/auth-context'
@@ -18,7 +19,11 @@ type NearbyService = {
   service_type: string
   phone: string | null
   distance_m: number | null
+  address?: string | null
+  lat?: number | null
+  lon?: number | null
   maps_url: string
+  maps_2gis_url?: string | null
   whatsapp_url: string | null
 }
 
@@ -82,6 +87,9 @@ const serviceTypeLabel: Record<string, string> = {
   water_utility: 'Water Utility',
   electrician: 'Electrician',
   power_company: 'Power Company',
+  service: 'Place',
+  restaurant: 'Restaurant',
+  cafe: 'Cafe',
 }
 
 const isNightIncident = (incidentTime: string) => {
@@ -166,7 +174,7 @@ const TicketsPage = () => {
             <h2 className='text-sm font-semibold text-slate-900'>
               {isResident ? 'My requests' : 'All requests'}
             </h2>
-            <Button variant='outline' size='sm' onClick={() => void loadTickets()} disabled={isLoading} className='h-8 text-xs'>
+            <Button variant='outline' onClick={() => void loadTickets()} disabled={isLoading} className='h-8 text-xs'>
               Refresh
             </Button>
           </div>
@@ -372,6 +380,8 @@ function TicketDetailModal({
   const [deleting, setDeleting] = useState(false)
   const [decision, setDecision] = useState(ticket.decision ?? '')
   const [nearbyServices, setNearbyServices] = useState<NearbyService[]>([])
+  const [nearbyCenter, setNearbyCenter] = useState<{ lat: number; lon: number } | null>(null)
+  const [nearbySearchQuery, setNearbySearchQuery] = useState<string>('сантехник')
   const [loadingNearby, setLoadingNearby] = useState(false)
   const [nearbyError, setNearbyError] = useState<string | null>(null)
 
@@ -409,6 +419,7 @@ function TicketDetailModal({
     const ticketTags = ticket.complaint_types?.length ? ticket.complaint_types : ticket.complaint_type ? [ticket.complaint_type] : []
     if (ticketTags.includes('recommendation')) {
       setNearbyServices([])
+      setNearbyCenter(null)
       setNearbyError(null)
       return
     }
@@ -417,10 +428,22 @@ function TicketDetailModal({
       setLoadingNearby(true)
       setNearbyError(null)
       try {
-        const data = await apiRequest<NearbyService[]>(`/tickets/${ticket.id}/nearby-services`, { token: accessToken })
-        setNearbyServices(data)
+        const data = await apiRequest<{ services: NearbyService[]; center_lat?: number; center_lon?: number; search_query?: string }>(
+          `/tickets/${ticket.id}/nearby-services`,
+          { token: accessToken }
+        )
+        setNearbyServices(data.services ?? [])
+        if (data.center_lat != null && data.center_lon != null) {
+          setNearbyCenter({ lat: data.center_lat, lon: data.center_lon })
+        } else {
+          setNearbyCenter(null)
+        }
+        const ticketTags = ticket.complaint_types?.length ? ticket.complaint_types : ticket.complaint_type ? [ticket.complaint_type] : []
+        setNearbySearchQuery(data.search_query ?? ((ticketTags.includes('water') || ticket.complaint_type === 'water') ? 'сантехник' : (ticketTags.includes('electricity') || ticket.complaint_type === 'electricity') ? 'электрик' : (ticketTags.includes('neighbors') || ticket.complaint_type === 'neighbors') ? 'полиция' : 'ЖКХ'))
       } catch (error) {
         setNearbyError(error instanceof ApiError ? error.message : 'Failed to load nearby services')
+        setNearbyServices([])
+        setNearbyCenter(null)
       } finally {
         setLoadingNearby(false)
       }
@@ -529,10 +552,33 @@ function TicketDetailModal({
                 <p className='text-xs text-slate-500'>Finding nearest services…</p>
               ) : nearbyError ? (
                 <p className='text-xs text-rose-600'>{nearbyError}</p>
-              ) : nearbyServices.length === 0 ? (
-                <p className='text-xs text-slate-500'>No nearby services found for this complaint type.</p>
               ) : (
-                <div className='space-y-2'>
+                <>
+                  {nearbyCenter && (
+                    <NearbyServicesMap
+                      centerLat={nearbyCenter.lat}
+                      centerLon={nearbyCenter.lon}
+                      services={nearbyServices}
+                      buildingName={`Apt ${ticket.apartment_id.replace('apt-', '')}`}
+                      searchQuery={nearbySearchQuery}
+                    />
+                  )}
+                  {nearbyServices.length === 0 ? (
+                    <div className='space-y-1.5'>
+                      <p className='text-xs text-slate-500'>No nearby services found. Search on 2GIS for local results.</p>
+                      {nearbyCenter && (
+                        <a
+                          href={get2gisSearchUrl(nearbySearchQuery, nearbyCenter.lat, nearbyCenter.lon)}
+                          target='_blank'
+                          rel='noreferrer'
+                          className='inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50'
+                        >
+                          <FiMapPin className='size-3' /> Search on 2GIS
+                        </a>
+                      )}
+                    </div>
+                  ) : (
+                    <div className='space-y-2'>
                   {nearbyServices.map((service, idx) => (
                     <div key={`${service.service_type}-${service.name}-${idx}`} className='rounded-md border border-slate-200 bg-white p-2.5'>
                       <div className='flex items-start justify-between gap-2'>
@@ -555,13 +601,20 @@ function TicketDetailModal({
                             </a>
                           )}
                           <a href={service.maps_url} target='_blank' rel='noreferrer' className='inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-[10px] text-slate-700 hover:bg-slate-50'>
-                            <FiMapPin className='size-3' /> Map <FiExternalLink className='size-3' />
+                            <FiMapPin className='size-3' /> Google
                           </a>
+                          {service.maps_2gis_url && (
+                            <a href={service.maps_2gis_url} target='_blank' rel='noreferrer' className='inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-[10px] text-slate-700 hover:bg-slate-50'>
+                              2GIS
+                            </a>
+                          )}
                         </div>
                       </div>
                     </div>
                   ))}
                 </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -616,7 +669,7 @@ function TicketDetailModal({
                 placeholder='Add a follow-up…'
                 className='flex-1'
               />
-              <Button type='submit' disabled={sendingFollowUp || !followUpText.trim()} size='sm'>
+              <Button type='submit' disabled={sendingFollowUp || !followUpText.trim()}>
                 Send
               </Button>
             </form>

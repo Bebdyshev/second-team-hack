@@ -20,13 +20,14 @@ from src.housing.schemas import (
     HouseSummary,
     LoginRequest,
     ManagerActionProof,
+    NearbyService,
+    NearbyServicesResponse,
     ProveActionRequest,
     RefreshRequest,
     RegisterRequest,
     ReportAnchor,
     ResourceAlert,
     MeterHealth,
-    NearbyService,
     Task,
     UpdateTaskRequest,
     UserProfile,
@@ -88,6 +89,18 @@ def _resolve_escalation_services(complaint_tags: list[str], incident_time: str) 
 
     deduped = [item for item in dict.fromkeys(service_types)]
     return deduped or ["housing_office"]
+
+
+def _service_type_to_search_query(service_types: list[str]) -> str:
+    """Fallback 2GIS query when Gemini returns no text_queries."""
+    for st in service_types:
+        if st in ("plumber", "water_utility"):
+            return "сантехник"
+        if st in ("electrician", "power_company"):
+            return "электрик"
+        if st == "police":
+            return "полиция"
+    return "ЖКХ"
 
 
 @router.post("/auth/login", response_model=AuthResponse)
@@ -590,7 +603,7 @@ def get_ticket(
     return ticket
 
 
-@router.get("/tickets/{ticket_id}/nearby-services", response_model=list[NearbyService])
+@router.get("/tickets/{ticket_id}/nearby-services", response_model=NearbyServicesResponse)
 def get_ticket_nearby_services(
     ticket_id: str,
     radius_m: int = Query(default=2500, ge=500, le=10000),
@@ -598,7 +611,7 @@ def get_ticket_nearby_services(
     lon: float | None = Query(default=None),
     user: dict[str, str] = Depends(get_current_user),
     db=Depends(get_housing_db),
-) -> list[NearbyService]:
+) -> NearbyServicesResponse:
     ticket = store.get_ticket(ticket_id, db=db)
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ticket not found")
@@ -609,10 +622,16 @@ def get_ticket_nearby_services(
     if user["role"] == "Resident" and user["id"] != ticket.resident_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
 
+    house = store.get_house(ticket.house_id)
+
+    text_queries = gemini_client.resolve_service_search_queries(
+        ticket.subject, ticket.description or ""
+    )
     complaint_tags = ticket.complaint_types if ticket.complaint_types else ([ticket.complaint_type] if ticket.complaint_type else [])
-    service_types = _resolve_escalation_services(complaint_tags, ticket.incident_time)
-    if not service_types:
-        return []
+    service_types = _resolve_escalation_services(complaint_tags, ticket.incident_time) if complaint_tags else []
+
+    if not text_queries and not service_types:
+        return NearbyServicesResponse(services=[], search_query="ЖКХ")
 
     # Use browser-provided coordinates if available, otherwise geocode the building address
     coordinates: tuple[float, float] | None = None
@@ -625,9 +644,9 @@ def get_ticket_nearby_services(
             lon,
         )
     else:
-        house = store.get_house(ticket.house_id)
         if house is None:
-            return []
+            sq = text_queries[0] if text_queries else _service_type_to_search_query(service_types)
+            return NearbyServicesResponse(services=[], search_query=sq)
         coordinates = geocode_address(house.address)
         if not coordinates:
             logger.warning(
@@ -636,11 +655,29 @@ def get_ticket_nearby_services(
                 ticket.house_id,
                 house.address,
             )
-            return []
+            sq = text_queries[0] if text_queries else _service_type_to_search_query(service_types)
+            return NearbyServicesResponse(services=[], search_query=sq)
 
     search_lat, search_lon = coordinates
-    services = find_nearby(search_lat, search_lon, service_types, radius_m=radius_m)
-    return [NearbyService(**item) for item in services]
+    try:
+        services = find_nearby(
+            search_lat, search_lon, service_types, radius_m=radius_m, text_queries=text_queries or None
+        )
+        search_query = (text_queries[0] if text_queries else None) or _service_type_to_search_query(service_types)
+        return NearbyServicesResponse(
+            services=[NearbyService(**item) for item in services],
+            center_lat=search_lat,
+            center_lon=search_lon,
+            search_query=search_query,
+        )
+    except Exception as exc:
+        logger.exception("nearby_services_error ticket_id=%s error=%s", ticket_id, exc)
+        return NearbyServicesResponse(
+            services=[],
+            center_lat=search_lat,
+            center_lon=search_lon,
+            search_query=(text_queries[0] if text_queries else None) or _service_type_to_search_query(service_types),
+        )
 
 
 @router.patch("/tickets/{ticket_id}", response_model=Ticket)

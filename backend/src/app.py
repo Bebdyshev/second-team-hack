@@ -1,15 +1,37 @@
 from datetime import datetime, timezone
+import logging
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.housing import router as housing_router
 from src.housing.db import init_housing_db
 
+logger = logging.getLogger(__name__)
 
 ENABLE_PUBLIC_DOCS = os.getenv("ENABLE_PUBLIC_DOCS", "true").lower() == "true"
+
+CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3002",
+    "http://localhost:5173",
+    "http://localhost:5174",
+]
+
+
+def _cors_headers(origin: str | None) -> dict[str, str]:
+    if origin and origin in CORS_ORIGINS:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    return {"Access-Control-Allow-Origin": CORS_ORIGINS[0]}
+
 
 app = FastAPI(
     title="ResMonitor API",
@@ -22,18 +44,28 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3002",
-        "http://localhost:5173",
-        "http://localhost:5174",
-    ],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 app.include_router(housing_router)
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Ensure 500 responses include CORS headers so the browser shows the real error."""
+    if isinstance(exc, HTTPException):
+        raise  # Let FastAPI handle HTTPException (404, 403, etc.)
+    logger.exception("unhandled_exception path=%s error=%s", request.url.path, exc)
+    origin = request.headers.get("origin")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+        headers=_cors_headers(origin),
+    )
 
 
 @app.on_event("startup")

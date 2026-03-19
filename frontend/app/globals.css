@@ -6,6 +6,15 @@ body {
   @apply bg-[#f0f2f5] text-slate-900 antialiased;
 }
 
+/* Leaflet custom markers – override defaults */
+.leaflet-marker-icon.custom-marker {
+  background: transparent !important;
+  border: none !important;
+}
+.leaflet-marker-icon.building-marker {
+  z-index: 1000 !important;
+}
+
 @layer utilities {
   .scrollbar-hide {
     -ms-overflow-style: none;

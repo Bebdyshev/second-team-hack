@@ -126,8 +126,18 @@ class NearbyService(BaseModel):
     phone: str | None = None
     distance_m: int | None = None
     address: str | None = None
+    lat: float | None = None
+    lon: float | None = None
     maps_url: str
+    maps_2gis_url: str | None = None
     whatsapp_url: str | None = None
+
+
+class NearbyServicesResponse(BaseModel):
+    services: list[NearbyService]
+    center_lat: float | None = None
+    center_lon: float | None = None
+    search_query: str | None = None  # For 2GIS search link (e.g. "сантехник", "электрик")
 
 
 class ReportAnchor(BaseModel):

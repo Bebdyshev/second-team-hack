@@ -27,18 +27,17 @@ SYSTEM_PROMPT = """You classify resident tickets for a building management syste
 Given the resident's subject and description, analyze the text and assign 1–3 relevant tags. Pick only tags that clearly apply.
 
 Available tags:
-- neighbors: noise, loud music, screaming, party, smoking, conflict with other residents, apartment above/below/next door
+- neighbors: noise, loud music, screaming, party, smoking, conflict with other residents
 - water: leaks, low pressure, dirty water, plumbing, pipes, flooding, no hot water
 - electricity: power outage, flickering lights, breakers, no power, outlets
 - schedule: heating schedule, cleaning schedule, maintenance timing, when services run
-- recommendation: suggestion, improvement idea, proposal (not a complaint)
+- recommendation: suggestion, improvement idea, proposal, question (not a complaint)
 - general: overall dissatisfaction, unclear, or none of the above fit
 
 Rules:
 - Use 1–3 tags. No more than 3.
 - Order by relevance (most relevant first).
 - Be precise: only add a tag if the text clearly supports it.
-- If unsure, use "general" as fallback.
 - Copy title and description exactly from the input.
 - ai_comment: one short actionable tip for the manager.
 
@@ -74,6 +73,35 @@ Respond with valid JSON only (no markdown):
 tags: 1–3 items from: neighbors, water, electricity, schedule, general, recommendation
 priority: critical (immediate danger) | high (same-day) | medium (few days) | low (can wait)
 """
+
+SERVICE_SEARCH_PROMPT = """You understand a resident's request and output 1–3 search phrases for Google Places / 2GIS. Use terms that work in map search.
+
+Subject: {subject}
+Description: {description}
+
+Return JSON only: {{"queries": ["phrase1", "phrase2", "phrase3"]}}
+
+Use these exact phrases (or very similar) – they work well in 2GIS/Google:
+- Water leak, pipes, plumbing, no hot water → сантехник, водопроводчик, plumber
+- No power, electricity, flickering lights → электрик, electrician
+- Noisy neighbors, loud music, conflict → полиция, police
+- Hungry, where to eat, nothing to eat, restaurants → ресторан, кафе, restaurant
+- Heating, cold apartment → ЖКХ, управляющая компания, heating
+- Gas smell, gas leak → газовая служба, emergency
+- Elevator broken → лифт сервис, elevator repair
+- Cleaning, уборка → клининг, химчистка
+- Locksmith, замок → слесарь, locksmith
+- Roof leak → кровля, roofing
+- Trash, мусор → вывоз мусора, waste
+- Parking → парковка, parking
+- Pharmacy, medicine → аптека, pharmacy
+- Doctor, больница → поликлиника, clinic
+- Bank, ATM → банк, банкомат
+- Post office → почта
+- Grocery, products → магазин, супермаркет
+- General housing issue → ЖКХ, управляющая компания
+
+Rules: Output profession/business type, not the problem. Max 3 phrases. Short (1–3 words). Prefer Russian for Kazakhstan."""
 
 
 def _extract_text(data: dict[str, Any]) -> str:
@@ -199,3 +227,33 @@ def transform_ticket_to_task(
         "complaint_type": complaint_type,
         "complaint_types": complaint_types_str,
     }
+
+
+def resolve_service_search_queries(subject: str, description: str) -> list[str]:
+    """Use Gemini to understand the situation and output search phrases for Google Places / 2GIS."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return []
+
+    prompt = SERVICE_SEARCH_PROMPT.format(
+        subject=subject[:200],
+        description=(description or "")[:300],
+    )
+
+    try:
+        content = _call_gemini(prompt, api_key)
+    except Exception as e:
+        logger.warning("service_search_queries_error error=%s", e)
+        return []
+
+    content = content.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[-1].rsplit("```", 1)[0]
+    content = content.strip()
+
+    try:
+        parsed = json.loads(content)
+        queries = parsed.get("queries") or []
+        return [str(q).strip()[:50] for q in queries[:3] if str(q).strip()]
+    except json.JSONDecodeError:
+        return []

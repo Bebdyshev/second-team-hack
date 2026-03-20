@@ -148,7 +148,7 @@ const ResourceChart = ({ label, values, unit, warn, critical, findings, resource
     : 'bg-emerald-400'
 
   return (
-    <div className='rounded-xl border border-slate-200 bg-white p-4'>
+    <div className='min-w-0 rounded-xl border border-slate-200 bg-white p-4'>
       <div className='mb-3 flex items-center justify-between'>
         <div className='flex items-center gap-2'>
           <span className={`size-2 rounded-full ${levelDot}`} />
@@ -160,8 +160,8 @@ const ResourceChart = ({ label, values, unit, warn, critical, findings, resource
         </div>
       </div>
 
-      <div className='h-40'>
-        <ResponsiveContainer width='100%' height='100%'>
+      <div className='h-40 min-h-[10rem] w-full min-w-0'>
+        <ResponsiveContainer width='100%' height='100%' minWidth={0} minHeight={160}>
           <LineChart data={data}>
             <CartesianGrid strokeDasharray='3 3' stroke='#f8fafc' vertical={false} />
             <XAxis
@@ -224,7 +224,8 @@ const StreamingCursor = () => (
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 const KnowledgeBasePage = () => {
-  const { accessToken, activeOrganizationId } = useAuth()
+  const { accessToken, activeOrganizationId, activeRole, user } = useAuth()
+  const isResident = activeRole === 'Resident'
 
   // Scope filter
   const [scope, setScope] = useState<Scope>('house')
@@ -247,16 +248,28 @@ const KnowledgeBasePage = () => {
 
   const abortRef = useRef<AbortController | null>(null)
 
-  // Load apartment list once
+  // Load apartment list once (residents get only their unit from API)
   useEffect(() => {
     if (!accessToken || !activeOrganizationId) return
     apiRequest<ApartmentItem[]>(`/houses/${activeOrganizationId}/apartments`, { token: accessToken })
       .then((data) => {
         setApartments(data)
-        if (data.length > 0) setSelectedApt(data[0].id)
+        if (data.length > 0) {
+          const preferred = user?.apartment_id && data.some((a) => a.id === user.apartment_id)
+            ? user.apartment_id
+            : data[0].id
+          setSelectedApt(preferred)
+        }
       })
       .catch(() => {})
-  }, [accessToken, activeOrganizationId])
+  }, [accessToken, activeOrganizationId, user?.apartment_id])
+
+  // Residents: analytics scope is always their apartment only
+  useEffect(() => {
+    if (!isResident || !user?.apartment_id) return
+    setScope('apartment')
+    setSelectedApt(user.apartment_id)
+  }, [isResident, user?.apartment_id])
 
   const loadAlerts = useCallback(async () => {
     if (!accessToken || !activeOrganizationId) return
@@ -438,35 +451,47 @@ const KnowledgeBasePage = () => {
       <div className='mb-5 flex flex-wrap items-center justify-between gap-3'>
         {/* Scope filter */}
         <div className='flex items-center gap-2'>
-          <div className='flex rounded-lg border border-slate-200 bg-white p-0.5 text-sm'>
-            {(['house', 'apartment'] as Scope[]).map((s) => (
-              <button
-                key={s}
-                type='button'
-                onClick={() => setScope(s)}
-                className={`rounded-md px-3 py-1.5 font-medium transition-colors ${
-                  scope === s
-                    ? 'bg-slate-900 text-white'
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                {s === 'house' ? 'Whole house' : 'Apartment'}
-              </button>
-            ))}
-          </div>
+          {isResident ? (
+            <div className='flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700'>
+              <span className='font-medium text-slate-900'>Your apartment</span>
+              {apartments[0] ? (
+                <span className='text-slate-500'>· #{apartments[0].number}</span>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <div className='flex rounded-lg border border-slate-200 bg-white p-0.5 text-sm'>
+                {(['house', 'apartment'] as Scope[]).map((s) => (
+                  <button
+                    key={s}
+                    type='button'
+                    onClick={() => setScope(s)}
+                    className={`rounded-md px-3 py-1.5 font-medium transition-colors ${
+                      scope === s
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    {s === 'house' ? 'Whole house' : 'Apartment'}
+                  </button>
+                ))}
+              </div>
 
-          {scope === 'apartment' && apartments.length > 0 && (
-            <select
-              value={selectedApt}
-              onChange={(e) => setSelectedApt(e.target.value)}
-              className='rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 outline-none focus:ring-1 focus:ring-slate-300'
-            >
-              {apartments.map((a) => (
-                <option key={a.id} value={a.id}>
-                  Apt {a.number}
-                </option>
-              ))}
-            </select>
+              {scope === 'apartment' && apartments.length > 0 && (
+                <select
+                  value={selectedApt}
+                  onChange={(e) => setSelectedApt(e.target.value)}
+                  className='rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 outline-none focus:ring-1 focus:ring-slate-300'
+                  aria-label='Select apartment'
+                >
+                  {apartments.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      Apt {a.number}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </>
           )}
         </div>
 
@@ -548,7 +573,7 @@ const KnowledgeBasePage = () => {
 
           {/* Resource charts */}
           {metrics && (
-            <div className='grid gap-4 lg:grid-cols-2'>
+            <div className='grid min-w-0 gap-4 lg:grid-cols-2'>
               <ResourceChart
                 label='Electricity'
                 values={metrics.electricity_24h}

@@ -126,6 +126,45 @@ def _assert_apartment_access(user: dict[str, str], apartment: Apartment) -> None
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden for this apartment")
 
 
+def _apartments_for_analytics(
+    user: dict[str, str],
+    house_id: str,
+    apartment_id: str | None,
+) -> tuple[list[Apartment], str | None]:
+    """Which apartments to aggregate for house analytics.
+
+    Managers: whole house, or one apartment when ``apartment_id`` is set.
+    Residents: only their unit; optional ``apartment_id`` must match (or be omitted).
+    Returns ``(apartments, effective_apartment_id)`` for cache keys (``None`` = whole house).
+    """
+    all_apt = store.list_apartments(house_id)
+    if not all_apt:
+        return [], None
+
+    if user["role"] == "Manager":
+        if apartment_id:
+            filtered = [a for a in all_apt if a.id == apartment_id]
+            return (filtered, apartment_id)
+        return (all_apt, None)
+
+    own = (user.get("apartment_id") or "").strip()
+    if not own:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="resident has no apartment assigned",
+        )
+    if apartment_id and apartment_id != own:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="forbidden: cannot view other apartments' analytics",
+        )
+    eff = apartment_id or own
+    filtered = [a for a in all_apt if a.id == eff]
+    if not filtered:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="apartment not found")
+    return (filtered, eff)
+
+
 def _is_night_incident(incident_time: str) -> bool:
     try:
         hour = int(incident_time.split(":", 1)[0])
@@ -276,9 +315,15 @@ def house_dynamics(
 
 
 @router.get("/houses/{house_id}/apartments", response_model=list[Apartment])
-def house_apartments(house_id: str, user: dict[str, str] = Depends(require_manager)) -> list[Apartment]:
+def house_apartments(house_id: str, user: dict[str, str] = Depends(get_current_user)) -> list[Apartment]:
     _assert_house_access(user, house_id)
-    return store.list_apartments(house_id)
+    all_apt = store.list_apartments(house_id)
+    if user["role"] == "Manager":
+        return all_apt
+    own = (user.get("apartment_id") or "").strip()
+    if not own:
+        return []
+    return [a for a in all_apt if a.id == own]
 
 
 @router.get("/apartments/{apartment_id}/summary")
@@ -342,7 +387,13 @@ def apartment_dynamics(
 def alerts(house_id: str | None = Query(default=None), user: dict[str, str] = Depends(get_current_user)) -> list[ResourceAlert]:
     target_house = house_id or user["house_id"]
     _assert_house_access(user, target_house)
-    return store.list_alerts(target_house)
+    items = store.list_alerts(target_house)
+    if user["role"] == "Resident":
+        own = (user.get("apartment_id") or "").strip()
+        if not own:
+            return []
+        items = [a for a in items if a.apartment_id == own]
+    return items
 
 
 @router.get("/meters", response_model=list[MeterHealth])
@@ -1194,7 +1245,8 @@ def get_ticket(
 @router.get("/houses/{house_id}/analytics/reasoning")
 def house_analytics_reasoning(
     house_id: str,
-    user: dict[str, str] = Depends(require_manager),
+    apartment_id: str | None = Query(default=None),
+    user: dict[str, str] = Depends(get_current_user),
 ) -> dict:
     _assert_house_access(user, house_id)
 
@@ -1202,11 +1254,11 @@ def house_analytics_reasoning(
     if house is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="house not found")
 
-    apartments = store.list_apartments(house_id)
+    apartments, _eff = _apartments_for_analytics(user, house_id, apartment_id)
     if not apartments:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no apartments found")
 
-    # Aggregate hourly data across all apartments
+    # Aggregate hourly data across selected apartments
     electricity_24h: list[float] = []
     water_24h: list[float] = []
     co2_24h: list[float] = []
@@ -1242,7 +1294,7 @@ def house_analytics_reasoning_stream(
     house_id: str,
     apartment_id: str | None = Query(default=None),
     force_refresh: bool = Query(default=False),
-    user: dict[str, str] = Depends(require_manager),
+    user: dict[str, str] = Depends(get_current_user),
 ) -> StreamingResponse:
     _assert_house_access(user, house_id)
 
@@ -1250,16 +1302,12 @@ def house_analytics_reasoning_stream(
     if house is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="house not found")
 
-    apartments = store.list_apartments(house_id)
+    apartments, effective_apt_id = _apartments_for_analytics(user, house_id, apartment_id)
     if not apartments:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no apartments found")
 
-    # If apartment_id is provided, filter to that single apartment
-    if apartment_id:
-        apartments = [a for a in apartments if a.id == apartment_id]
-        if not apartments:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="apartment not found")
-        scope_name = f"Apartment {apartment_id}"
+    if len(apartments) == 1:
+        scope_name = f"Apartment {apartments[0].id}"
     else:
         scope_name = house.name
 
@@ -1281,7 +1329,7 @@ def house_analytics_reasoning_stream(
         "event: metrics\n"
         f"data: {_json.dumps({'electricity_24h': electricity_24h, 'water_24h': water_24h, 'co2_24h': co2_24h})}\n\n"
     )
-    scope_key = f"{house_id}:{apartment_id or 'all'}"
+    scope_key = f"{house_id}:{effective_apt_id or 'all'}"
     metrics_signature = _json.dumps(
         {"electricity_24h": electricity_24h, "water_24h": water_24h, "co2_24h": co2_24h},
         sort_keys=True,

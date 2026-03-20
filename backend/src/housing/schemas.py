@@ -105,6 +105,7 @@ class ResourceAlert(BaseModel):
     id: str
     house_id: str
     house_name: str
+    apartment_id: str | None = None  # None = house-level; set for unit-specific alerts (residents see only their match)
     resource: str
     severity: Literal["low", "medium", "high"]
     title: str

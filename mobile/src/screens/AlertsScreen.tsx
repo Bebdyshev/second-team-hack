@@ -177,8 +177,9 @@ function ResourceChart({
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export default function AlertsScreen() {
-  const { accessToken, activeOrganizationId } = useAuth()
+  const { accessToken, activeOrganizationId, activeRole, user } = useAuth()
   const houseId = activeOrganizationId ?? 'house-1'
+  const isResident = activeRole === 'Resident'
 
   const [scope, setScope] = useState<Scope>('house')
   const [apartments, setApartments] = useState<ApartmentItem[]>([])
@@ -196,16 +197,29 @@ export default function AlertsScreen() {
 
   const abortRef = useRef<unknown>(null)
 
-  // Load apartments
+  // Load apartments (API returns only the resident's unit for Resident role)
   useEffect(() => {
     if (!accessToken) return
     apiRequest<ApartmentItem[]>(`/houses/${houseId}/apartments`, { token: accessToken })
       .then((data) => {
         setApartments(data)
-        if (data.length > 0) setSelectedAptId(data[0].id)
+        if (data.length > 0) {
+          const preferred =
+            user?.apartment_id && data.some((a) => a.id === user.apartment_id)
+              ? user.apartment_id
+              : data[0].id
+          setSelectedAptId(preferred)
+        }
       })
       .catch(() => {})
-  }, [accessToken, houseId])
+  }, [accessToken, houseId, user?.apartment_id])
+
+  // Residents: only their apartment (no whole-building toggle)
+  useEffect(() => {
+    if (!isResident || !user?.apartment_id) return
+    setScope('apartment')
+    setSelectedAptId(user.apartment_id)
+  }, [isResident, user?.apartment_id])
 
   const loadAlerts = useCallback(async () => {
     if (!accessToken) return
@@ -351,22 +365,31 @@ export default function AlertsScreen() {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { void loadAlerts() }} />}
     >
-      {/* Scope toggle + refresh */}
+      {/* Scope: managers Whole house / Apartment; residents — label only */}
       <View style={styles.headerRow}>
-        <View style={styles.scopeToggle}>
-          {(['house', 'apartment'] as Scope[]).map((s) => (
-            <TouchableOpacity
-              key={s}
-              onPress={() => setScope(s)}
-              style={[styles.scopeBtn, scope === s && styles.scopeBtnActive]}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.scopeBtnText, scope === s && styles.scopeBtnTextActive]}>
-                {s === 'house' ? 'Whole house' : 'Apartment'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {isResident ? (
+          <View style={styles.residentScopeLabel}>
+            <Text style={styles.residentScopeTitle}>Your apartment</Text>
+            {apartments[0] ? (
+              <Text style={styles.residentScopeSub}>· #{apartments[0].number}</Text>
+            ) : null}
+          </View>
+        ) : (
+          <View style={styles.scopeToggle}>
+            {(['house', 'apartment'] as Scope[]).map((s) => (
+              <TouchableOpacity
+                key={s}
+                onPress={() => setScope(s)}
+                style={[styles.scopeBtn, scope === s && styles.scopeBtnActive]}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.scopeBtnText, scope === s && styles.scopeBtnTextActive]}>
+                  {s === 'house' ? 'Whole house' : 'Apartment'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
         <View style={styles.headerRight}>
           {lastRefreshed && <Text style={styles.updatedText}>Updated {lastRefreshed}</Text>}
@@ -377,8 +400,8 @@ export default function AlertsScreen() {
         </View>
       </View>
 
-      {/* Apartment picker when scope = apartment */}
-      {scope === 'apartment' && apartments.length > 0 && (
+      {/* Apartment picker — managers only (residents have a single unit) */}
+      {!isResident && scope === 'apartment' && apartments.length > 0 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.aptPickerRow} contentContainerStyle={styles.aptPickerContent}>
           {apartments.map((a) => (
             <TouchableOpacity
@@ -530,6 +553,20 @@ const styles = StyleSheet.create({
   scopeBtnActive: { backgroundColor: '#0f172a' },
   scopeBtnText: { fontSize: 13, fontWeight: '500', color: '#64748b' },
   scopeBtnTextActive: { color: '#fff' },
+  residentScopeLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 4,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  residentScopeTitle: { fontSize: 13, fontWeight: '600', color: '#0f172a' },
+  residentScopeSub: { fontSize: 13, color: '#64748b' },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   updatedText: { fontSize: 11, color: '#94a3b8' },
   refreshBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },

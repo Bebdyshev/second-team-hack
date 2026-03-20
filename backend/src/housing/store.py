@@ -39,9 +39,36 @@ _houses: dict[str, House] = {
 }
 
 _alerts: list[ResourceAlert] = [
-    ResourceAlert(id="a-1", house_id="house-1", house_name="Maple Residence", resource="gas", severity="high", title="Unexpected night-time gas usage spike", detected_at="10:14"),
-    ResourceAlert(id="a-2", house_id="house-1", house_name="Maple Residence", resource="water", severity="medium", title="Persistent leak pattern in section B", detected_at="09:02"),
-    ResourceAlert(id="a-3", house_id="house-2", house_name="River Park", resource="electricity", severity="low", title="Elevator power draw above baseline", detected_at="07:48"),
+    ResourceAlert(
+        id="a-1",
+        house_id="house-1",
+        house_name="Maple Residence",
+        apartment_id="apt-804",
+        resource="gas",
+        severity="high",
+        title="Unexpected night-time gas usage spike",
+        detected_at="10:14",
+    ),
+    ResourceAlert(
+        id="a-2",
+        house_id="house-1",
+        house_name="Maple Residence",
+        apartment_id="apt-502",
+        resource="water",
+        severity="medium",
+        title="Persistent leak pattern in section B",
+        detected_at="09:02",
+    ),
+    ResourceAlert(
+        id="a-3",
+        house_id="house-2",
+        house_name="River Park",
+        apartment_id=None,
+        resource="electricity",
+        severity="low",
+        title="Elevator power draw above baseline",
+        detected_at="07:48",
+    ),
 ]
 
 _meters: list[MeterHealth] = [

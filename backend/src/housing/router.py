@@ -26,6 +26,7 @@ from src.housing.schemas import (
     EcoQuestCompleteRequest,
     EcoQuestStatusResponse,
     EcoQuestStreakResponse,
+    GenerateReportResponse,
     House,
     HouseSummary,
     LoginRequest,
@@ -476,13 +477,14 @@ def anchor_report(
     house_id: str,
     payload: AnchorRequest,
     user: dict[str, str] = Depends(require_manager),
+    db=Depends(get_housing_db),
 ) -> ReportAnchor:
     _assert_house_access(user, house_id)
     period = payload.period or datetime.utcnow().strftime("%Y-%m")
     report_hash = payload.report_hash or store.compute_hash({"house_id": house_id, "period": period, "type": "monthly_report"})
     metadata_uri = payload.metadata_uri or f"report://{house_id}/{period}"
 
-    existing = store.find_report_anchor(house_id, period, report_hash)
+    existing = store.find_report_anchor(house_id, period, report_hash, db=db)
     if existing is not None:
         return existing
 
@@ -505,7 +507,7 @@ def anchor_report(
         created_at=now,
         updated_at=now,
     )
-    return store.add_report_anchor(anchor)
+    return store.add_report_anchor(anchor, db=db)
 
 
 @router.get("/houses/{house_id}/reports/overview", response_model=ReportOverview)
@@ -521,9 +523,394 @@ def report_overview(
 
 
 @router.get("/houses/{house_id}/reports/anchors", response_model=list[ReportAnchor])
-def report_anchors(house_id: str, user: dict[str, str] = Depends(get_current_user)) -> list[ReportAnchor]:
+def report_anchors(
+    house_id: str,
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> list[ReportAnchor]:
     _assert_house_access(user, house_id)
-    return store.list_report_anchors(house_id)
+    return store.list_report_anchors(house_id, db=db)
+
+
+@router.get("/houses/{house_id}/reports/pdf")
+def report_pdf(
+    house_id: str,
+    user: dict[str, str] = Depends(get_current_user),
+    db=Depends(get_housing_db),
+) -> Response:
+    """Generate a per-apartment PDF report and return it as an attachment."""
+    _assert_house_access(user, house_id)
+
+    try:
+        from fpdf import FPDF, XPos, YPos
+    except ImportError:
+        raise HTTPException(status_code=503, detail="fpdf2 not installed - run: pip install fpdf2")
+
+    def _safe(text: str, max_len: int = 120) -> str:
+        """Strip characters outside Latin-1 range so Helvetica doesn't choke."""
+        cleaned = text.encode("latin-1", errors="replace").decode("latin-1")
+        return cleaned[:max_len]
+
+    overview = store.build_report_overview(house_id)
+    if overview is None:
+        raise HTTPException(status_code=404, detail="House not found")
+
+    anchors = store.list_report_anchors(house_id, db=db)
+    latest_anchor = anchors[0] if anchors else None
+
+    store._seed_apartments()
+    apartments = store.list_apartments(house_id)
+
+    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    period = datetime.utcnow().strftime("%Y-%m")
+
+    # ── PDF layout ─────────────────────────────────────────────────────────────
+    class PDF(FPDF):
+        def header(self):
+            self.set_font("Helvetica", "B", 9)
+            self.set_text_color(100, 100, 100)
+            self.cell(0, 6, _safe(f"CONFIDENTIAL  |  {overview.house_name}  |  Generated {now_str}"), align="R")
+            self.ln(8)
+
+        def footer(self):
+            self.set_y(-14)
+            self.set_font("Helvetica", "", 7)
+            self.set_text_color(160, 160, 160)
+            if latest_anchor:
+                self.cell(0, 5, f"On-chain proof: {latest_anchor.report_hash[:24]}...  |  TX: {latest_anchor.tx_hash[:24]}...  |  Polygon Amoy chain {latest_anchor.chain_id}", align="C")
+            self.ln(4)
+            self.cell(0, 5, f"Page {self.page_no()}", align="C")
+
+    pdf = PDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+
+    # ── Cover / title block ────────────────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 22)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 10, _safe(overview.house_name, 60), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 11)
+    pdf.set_text_color(71, 85, 105)
+    pdf.cell(0, 6, f"Apartment Analytics Report  |  Period: {period}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(3)
+
+    # Provenance line
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(100, 116, 139)
+    pdf.cell(0, 5,
+        f"Apartments: {overview.provenance.apartments_measured}  |  "
+        f"Meters: {overview.provenance.meters_used}  |  "
+        f"Anomalies detected: {len(overview.anomalies)}",
+        new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    if latest_anchor:
+        status_txt = "VERIFIED ON-CHAIN" if latest_anchor.status == "confirmed" else latest_anchor.status.upper()
+        pdf.set_text_color(22, 163, 74) if latest_anchor.status == "confirmed" else pdf.set_text_color(220, 38, 38)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(0, 5, f"Blockchain integrity: {status_txt}  |  {latest_anchor.explorer_url or 'N/A'}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(4)
+
+    # ── Separator ──────────────────────────────────────────────────────────────
+    pdf.set_draw_color(226, 232, 240)
+    pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+    pdf.ln(5)
+
+    # ── Section 1: Per-apartment table ────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 7, "Per-Apartment Overview", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1)
+
+    col_w = [18, 18, 22, 34, 28, 24, 50, 18, 18]
+    headers = ["Floor", "Unit", "Apt ID", "Status", "Elec avg (kWh)", "Water avg (L)", "CO2 avg (ppm)", "Score", "Anomalies"]
+
+    # Header row
+    pdf.set_fill_color(241, 245, 249)
+    pdf.set_font("Helvetica", "B", 7)
+    pdf.set_text_color(71, 85, 105)
+    for i, h in enumerate(headers):
+        pdf.cell(col_w[i], 7, h, border=1, fill=True, align="C")
+    pdf.ln()
+
+    # Data rows
+    pdf.set_font("Helvetica", "", 7)
+    row_num = 0
+    for apt in sorted(apartments, key=lambda a: (a.floor, a.unit)):
+        elec_avg = round(sum(apt.electricity_daily) / 24, 2)
+        water_avg = round(sum(apt.water_daily) / 24, 1)
+        co2_avg = round(sum(apt.co2_series) / 24, 0)
+
+        if apt.status == "alert":
+            pdf.set_text_color(185, 28, 28)
+        elif apt.status == "watch":
+            pdf.set_text_color(161, 98, 7)
+        else:
+            pdf.set_text_color(21, 128, 61)
+
+        fill = row_num % 2 == 1
+        pdf.set_fill_color(248, 250, 252)
+
+        pdf.cell(col_w[0], 6, str(apt.floor), border="B", fill=fill, align="C")
+        pdf.cell(col_w[1], 6, str(apt.unit), border="B", fill=fill, align="C")
+        pdf.set_text_color(15, 23, 42)
+        pdf.cell(col_w[2], 6, apt.id, border="B", fill=fill, align="C")
+        # Status badge text
+        s_color = {"alert": (185, 28, 28), "watch": (161, 98, 7), "good": (21, 128, 61)}.get(apt.status, (71, 85, 105))
+        pdf.set_text_color(*s_color)
+        pdf.cell(col_w[3], 6, apt.status.upper(), border="B", fill=fill, align="C")
+        pdf.set_text_color(15, 23, 42)
+        pdf.cell(col_w[4], 6, f"{elec_avg:.2f}", border="B", fill=fill, align="R")
+        pdf.cell(col_w[5], 6, f"{water_avg:.1f}", border="B", fill=fill, align="R")
+        pdf.cell(col_w[6], 6, f"{co2_avg:.0f}", border="B", fill=fill, align="R")
+        # Score - color coded
+        score_color = (21, 128, 61) if apt.score >= 80 else (161, 98, 7) if apt.score >= 60 else (185, 28, 28)
+        pdf.set_text_color(*score_color)
+        pdf.cell(col_w[7], 6, str(apt.score), border="B", fill=fill, align="C")
+        pdf.set_text_color(15, 23, 42)
+        pdf.cell(col_w[8], 6, str(len(apt.anomalies)), border="B", fill=fill, align="C")
+        pdf.ln()
+        row_num += 1
+
+    pdf.ln(6)
+
+    # ── Section 2: Monthly consumption table ──────────────────────────────────
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 7, "Monthly Consumption Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1)
+
+    m_col_w = [30, 42, 36, 36, 28, 32]
+    m_headers = ["Period", "Electricity (kWh)", "Water (L)", "CO2 avg (ppm)", "Anomalies", "Apartments"]
+
+    pdf.set_fill_color(241, 245, 249)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(71, 85, 105)
+    for i, h in enumerate(m_headers):
+        pdf.cell(m_col_w[i], 7, h, border=1, fill=True, align="C")
+    pdf.ln()
+
+    pdf.set_font("Helvetica", "", 8)
+    for row_i, row in enumerate(overview.monthly_rows):
+        fill = row_i % 2 == 1
+        pdf.set_fill_color(248, 250, 252)
+        pdf.set_text_color(15, 23, 42)
+        pdf.cell(m_col_w[0], 6, row.period, border="B", fill=fill, align="C")
+        pdf.cell(m_col_w[1], 6, f"{row.electricity_kwh:,.1f}", border="B", fill=fill, align="R")
+        pdf.cell(m_col_w[2], 6, f"{row.water_liters:,.0f}", border="B", fill=fill, align="R")
+        pdf.cell(m_col_w[3], 6, f"{row.co2_avg_ppm:.1f}", border="B", fill=fill, align="R")
+        anom_color = (185, 28, 28) if row.anomaly_count > 5 else (161, 98, 7) if row.anomaly_count > 0 else (21, 128, 61)
+        pdf.set_text_color(*anom_color)
+        pdf.cell(m_col_w[4], 6, str(row.anomaly_count), border="B", fill=fill, align="C")
+        pdf.set_text_color(15, 23, 42)
+        pdf.cell(m_col_w[5], 6, str(row.apartment_count), border="B", fill=fill, align="C")
+        pdf.ln()
+
+    pdf.ln(6)
+
+    # ── Section 3: Anomaly log ─────────────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 7, f"Anomaly Transparency Log  ({len(overview.anomalies)} events)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1)
+
+    if not overview.anomalies:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(0, 6, "No anomalies detected for this period.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    else:
+        a_col_w = [18, 30, 24, 170]
+        a_headers = ["Severity", "Resource", "Detected at", "Description"]
+        pdf.set_fill_color(241, 245, 249)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(71, 85, 105)
+        for i, h in enumerate(a_headers):
+            pdf.cell(a_col_w[i], 7, h, border=1, fill=True, align="C")
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 8)
+        for row_i, anomaly in enumerate(overview.anomalies):
+            fill = row_i % 2 == 1
+            pdf.set_fill_color(248, 250, 252)
+            sev_color = {"high": (185, 28, 28), "medium": (161, 98, 7), "low": (71, 85, 105)}.get(anomaly.severity, (71, 85, 105))
+            pdf.set_text_color(*sev_color)
+            pdf.cell(a_col_w[0], 6, anomaly.severity.upper(), border="B", fill=fill, align="C")
+            pdf.set_text_color(15, 23, 42)
+            pdf.cell(a_col_w[1], 6, _safe(anomaly.resource.capitalize(), 20), border="B", fill=fill)
+            pdf.cell(a_col_w[2], 6, _safe(anomaly.detected_at, 16), border="B", fill=fill, align="C")
+            pdf.cell(a_col_w[3], 6, _safe(anomaly.title, 80), border="B", fill=fill)
+            pdf.ln()
+
+    pdf.ln(6)
+
+    # ── Section 4: On-chain proof ──────────────────────────────────────────────
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 7, "Blockchain Integrity Proof", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2)
+
+    if not anchors:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(0, 6, "No on-chain anchors found. Use 'Generate & Anchor' on the Reports page to seal this report.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    else:
+        for anchor_item in anchors[:10]:
+            pdf.set_fill_color(248, 250, 252)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(15, 23, 42)
+            status_color = (21, 128, 61) if anchor_item.status == "confirmed" else (185, 28, 28) if anchor_item.status == "failed" else (161, 98, 7)
+            pdf.set_fill_color(240, 253, 244) if anchor_item.status == "confirmed" else pdf.set_fill_color(254, 242, 242)
+            pdf.cell(0, 7, f"Period: {anchor_item.period}  |  Status: {anchor_item.status.upper()}  |  {anchor_item.created_at.strftime('%Y-%m-%d %H:%M') if hasattr(anchor_item.created_at, 'strftime') else str(anchor_item.created_at)[:16]}", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", "", 7)
+            pdf.set_fill_color(248, 250, 252)
+            pdf.set_text_color(51, 65, 85)
+            pdf.cell(0, 5, _safe(f"Report Hash:  {anchor_item.report_hash}"), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.cell(0, 5, _safe(f"TX Hash:      {anchor_item.tx_hash}"), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            if anchor_item.explorer_url:
+                pdf.set_text_color(37, 99, 235)
+                pdf.cell(0, 5, _safe(f"Explorer:     {anchor_item.explorer_url}", 200), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.set_text_color(51, 65, 85)
+            pdf.ln(3)
+
+    # ── How to verify box ─────────────────────────────────────────────────────
+    pdf.ln(2)
+    pdf.set_draw_color(203, 213, 225)
+    pdf.set_fill_color(248, 250, 252)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(51, 65, 85)
+    pdf.cell(0, 7, "How to verify report integrity", fill=True, border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 8)
+    steps = [
+        "1. Take the Report Hash shown above.",
+        "2. Search for the TX Hash on https://amoy.polygonscan.com",
+        "3. In the transaction detail, open the 'Input Data' field (switch to UTF-8 view).",
+        "4. The first 66 characters of the data field should match the Report Hash exactly.",
+        "5. The block timestamp proves WHEN the report was sealed - it cannot be backdated.",
+    ]
+    for step in steps:
+        pdf.cell(0, 5, step, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    pdf_bytes = pdf.output()
+
+    filename = f"report_{house_id}_{period}.pdf"
+    return Response(
+        content=bytes(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/houses/{house_id}/reports/generate")
+def generate_and_anchor_report(
+    house_id: str,
+    user: dict[str, str] = Depends(require_manager),
+    db=Depends(get_housing_db),
+) -> StreamingResponse:
+    """Generate a monthly report, compute its canonical hash, and anchor it on-chain.
+
+    Streams Server-Sent Events so the browser can show real-time progress:
+      event: step   — GenerateReportStep (collecting → hashing → anchoring → done)
+      event: result — GenerateReportResponse JSON
+      event: error  — { message: str }
+    """
+    _assert_house_access(user, house_id)
+
+    user_snapshot = dict(user)
+    db_snapshot = db  # capture before generator runs
+
+    def _generate():
+        # ── Step 1: collect data ───────────────────────────────────────────────
+        yield (
+            "event: step\n"
+            f"data: {_json.dumps({'step': 'collecting', 'message': 'Collecting apartment and meter data…', 'progress': 20})}\n\n"
+        )
+
+        overview = store.build_report_overview(house_id)
+        if overview is None:
+            yield f"event: error\ndata: {_json.dumps({'message': 'House not found'})}\n\n"
+            return
+
+        # ── Step 2: compute canonical hash ────────────────────────────────────
+        yield (
+            "event: step\n"
+            f"data: {_json.dumps({'step': 'hashing', 'message': 'Computing canonical SHA-256 hash…', 'progress': 45})}\n\n"
+        )
+
+        report_hash = store.compute_overview_hash(overview)
+        period = datetime.utcnow().strftime("%Y-%m")
+
+        logger.info("generate_report_hash house_id=%s period=%s hash=%s", house_id, period, report_hash[:18])
+
+        # Idempotency: return existing anchor if same hash was already anchored
+        existing = store.find_report_anchor(house_id, period, report_hash, db=db_snapshot)
+        if existing is not None:
+            logger.info("generate_report_duplicate house_id=%s period=%s", house_id, period)
+            yield (
+                "event: step\n"
+                f"data: {_json.dumps({'step': 'exists', 'message': 'Identical report already anchored — returning cached proof.', 'progress': 100})}\n\n"
+            )
+            result = GenerateReportResponse(
+                overview=overview,
+                anchor=existing,
+                report_hash=report_hash,
+                already_exists=True,
+            )
+            yield f"event: result\ndata: {_json.dumps(result.model_dump(mode='json'), default=str)}\n\n"
+            return
+
+        # ── Step 3: anchor on-chain ────────────────────────────────────────────
+        yield (
+            "event: step\n"
+            f"data: {_json.dumps({'step': 'anchoring', 'message': 'Submitting transaction to Polygon Amoy…', 'progress': 70})}\n\n"
+        )
+
+        tx_meta = web3.defer_anchor(
+            "generate_report",
+            {"house_id": house_id, "period": period, "report_hash": report_hash},
+        )
+
+        now = store.now_utc()
+        short_hash = report_hash[:18]
+        anchor = ReportAnchor(
+            id=f"anchor-{uuid4().hex[:12]}",
+            house_id=house_id,
+            period=period,
+            metadata_uri=f"report://{house_id}/{period}",
+            report_hash=report_hash,
+            triggered_by=user_snapshot["id"],
+            status=tx_meta["status"],
+            tx_hash=tx_meta["tx_hash"],
+            block_number=tx_meta["block_number"],
+            chain_id=tx_meta["chain_id"],
+            contract_address=tx_meta["contract_address"],
+            explorer_url=tx_meta["explorer_url"],
+            error_message=tx_meta["error_message"],
+            created_at=now,
+            updated_at=now,
+        )
+        store.add_report_anchor(anchor, db=db_snapshot)
+
+        status_label = "Confirmed" if tx_meta["status"] == "confirmed" else "Failed"
+        yield (
+            "event: step\n"
+            f"data: {_json.dumps({'step': 'done', 'message': f'{status_label} · hash {short_hash}…', 'progress': 100})}\n\n"
+        )
+
+        result = GenerateReportResponse(
+            overview=overview,
+            anchor=anchor,
+            report_hash=report_hash,
+            already_exists=False,
+        )
+        yield f"event: result\ndata: {_json.dumps(result.model_dump(mode='json'), default=str)}\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
 
 
 @router.post("/manager-actions/prove", response_model=ManagerActionProof)

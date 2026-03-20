@@ -248,20 +248,129 @@ def compute_hash(payload: dict) -> str:
     return f"0x{digest}"
 
 
-def find_report_anchor(house_id: str, period: str, report_hash: str) -> ReportAnchor | None:
+def compute_overview_hash(overview: ReportOverview) -> str:
+    """Deterministic, canonical SHA-256 of a ReportOverview.
+
+    Excludes provenance.generated_at so the hash is stable across re-fetches
+    of the same underlying data. Uses json.dumps with sort_keys for stability.
+    """
+    import json as _json
+
+    canonical = {
+        "house_id": overview.house_id,
+        "house_name": overview.house_name,
+        "monthly_rows": [
+            {
+                "period": r.period,
+                "electricity_kwh": r.electricity_kwh,
+                "water_liters": r.water_liters,
+                "co2_avg_ppm": r.co2_avg_ppm,
+                "anomaly_count": r.anomaly_count,
+                "apartment_count": r.apartment_count,
+            }
+            for r in overview.monthly_rows
+        ],
+        "anomalies": [
+            {
+                "id": a.id,
+                "resource": a.resource,
+                "severity": a.severity,
+                "title": a.title,
+                "detected_at": a.detected_at,
+            }
+            for a in overview.anomalies
+        ],
+        "meters_used": overview.provenance.meters_used,
+        "apartments_measured": overview.provenance.apartments_measured,
+    }
+    serialized = _json.dumps(canonical, sort_keys=True, default=str)
+    return "0x" + hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _anchor_from_model(m) -> ReportAnchor:
+    return ReportAnchor(
+        id=m.id,
+        house_id=m.house_id,
+        period=m.period,
+        metadata_uri=m.metadata_uri or "",
+        report_hash=m.report_hash,
+        triggered_by=m.triggered_by,
+        status=m.status,  # type: ignore[arg-type]
+        tx_hash=m.tx_hash,
+        block_number=m.block_number or 0,
+        chain_id=m.chain_id or 80002,
+        contract_address=m.contract_address or "",
+        explorer_url=m.explorer_url or "",
+        error_message=m.error_message or "",
+        created_at=m.created_at,
+        updated_at=m.updated_at,
+    )
+
+
+def find_report_anchor(
+    house_id: str, period: str, report_hash: str, db: "Session | None" = None
+) -> ReportAnchor | None:
+    if db is not None:
+        from src.housing.models_db import ReportAnchorModel
+        row = (
+            db.query(ReportAnchorModel)
+            .filter(
+                ReportAnchorModel.house_id == house_id,
+                ReportAnchorModel.period == period,
+                ReportAnchorModel.report_hash == report_hash,
+            )
+            .first()
+        )
+        return _anchor_from_model(row) if row else None
     for item in _report_anchors:
         if item.house_id == house_id and item.period == period and item.report_hash == report_hash:
             return item
     return None
 
 
-def add_report_anchor(anchor: ReportAnchor) -> ReportAnchor:
+def add_report_anchor(anchor: ReportAnchor, db: "Session | None" = None) -> ReportAnchor:
+    if db is not None:
+        from src.housing.models_db import ReportAnchorModel
+        row = ReportAnchorModel(
+            id=anchor.id,
+            house_id=anchor.house_id,
+            period=anchor.period,
+            metadata_uri=anchor.metadata_uri,
+            report_hash=anchor.report_hash,
+            triggered_by=anchor.triggered_by,
+            status=anchor.status,
+            tx_hash=anchor.tx_hash,
+            block_number=anchor.block_number,
+            chain_id=anchor.chain_id,
+            contract_address=anchor.contract_address,
+            explorer_url=anchor.explorer_url,
+            error_message=anchor.error_message,
+            created_at=anchor.created_at,
+            updated_at=anchor.updated_at,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return anchor
     _report_anchors.append(anchor)
     return anchor
 
 
-def list_report_anchors(house_id: str) -> list[ReportAnchor]:
-    return sorted([item for item in _report_anchors if item.house_id == house_id], key=lambda item: item.created_at, reverse=True)
+def list_report_anchors(house_id: str, db: "Session | None" = None) -> list[ReportAnchor]:
+    if db is not None:
+        from src.housing.models_db import ReportAnchorModel
+        rows = (
+            db.query(ReportAnchorModel)
+            .filter(ReportAnchorModel.house_id == house_id)
+            .order_by(ReportAnchorModel.created_at.desc())
+            .all()
+        )
+        return [_anchor_from_model(r) for r in rows]
+    return sorted(
+        [item for item in _report_anchors if item.house_id == house_id],
+        key=lambda item: item.created_at,
+        reverse=True,
+    )
 
 
 def find_action_proof(house_id: str, action_hash: str) -> ManagerActionProof | None:

@@ -62,6 +62,25 @@ def _ensure_housing_schema(engine) -> None:
         "ALTER TABLE housing_tasks ALTER COLUMN complaint_type TYPE VARCHAR(64) USING complaint_type::VARCHAR(64)",
         "ALTER TABLE housing_tickets ALTER COLUMN complaint_type TYPE VARCHAR(64) USING complaint_type::VARCHAR(64)",
         "CREATE TABLE IF NOT EXISTS eco_quest_completions (id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(64) NOT NULL, quest_id VARCHAR(32) NOT NULL, completed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), photo_data TEXT)",
+        # report_anchors — persisted blockchain proofs
+        """CREATE TABLE IF NOT EXISTS report_anchors (
+            id VARCHAR(64) PRIMARY KEY,
+            house_id VARCHAR(64) NOT NULL,
+            period VARCHAR(16) NOT NULL,
+            metadata_uri VARCHAR(512) NOT NULL DEFAULT '',
+            report_hash VARCHAR(128) NOT NULL,
+            triggered_by VARCHAR(64) NOT NULL,
+            status VARCHAR(32) NOT NULL,
+            tx_hash VARCHAR(128) NOT NULL,
+            block_number BIGINT NOT NULL DEFAULT 0,
+            chain_id INTEGER NOT NULL DEFAULT 80002,
+            contract_address VARCHAR(128) NOT NULL DEFAULT '',
+            explorer_url VARCHAR(512) NOT NULL DEFAULT '',
+            error_message TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_report_anchors_house_id ON report_anchors(house_id)",
     ]
     with engine.begin() as conn:
         for statement in statements:

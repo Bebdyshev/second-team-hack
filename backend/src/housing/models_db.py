@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, BigInteger, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -76,3 +76,23 @@ class HousingTicketFollowUpModel(Base):
     created_at = Column(DateTime(timezone=True), nullable=False)
 
     ticket = relationship("HousingTicketModel", back_populates="follow_ups")
+
+
+class ReportAnchorModel(Base):
+    __tablename__ = "report_anchors"
+
+    id = Column(String(64), primary_key=True)
+    house_id = Column(String(64), nullable=False, index=True)
+    period = Column(String(16), nullable=False)
+    metadata_uri = Column(String(512), nullable=False, default="")
+    report_hash = Column(String(128), nullable=False)
+    triggered_by = Column(String(64), nullable=False)
+    status = Column(String(32), nullable=False)
+    tx_hash = Column(String(128), nullable=False)
+    block_number = Column(BigInteger, nullable=False, default=0)
+    chain_id = Column(Integer, nullable=False, default=80002)
+    contract_address = Column(String(128), nullable=False, default="")
+    explorer_url = Column(String(512), nullable=False, default="")
+    error_message = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)

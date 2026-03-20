@@ -1,7 +1,20 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FiRefreshCw, FiExternalLink, FiCopy, FiCheck, FiShield, FiAlertTriangle, FiActivity, FiDatabase } from 'react-icons/fi'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  FiRefreshCw,
+  FiExternalLink,
+  FiCopy,
+  FiCheck,
+  FiShield,
+  FiAlertTriangle,
+  FiActivity,
+  FiDatabase,
+  FiZap,
+  FiX,
+  FiLock,
+  FiDownload,
+} from 'react-icons/fi'
 
 import { AppShell } from '@/components/app-shell'
 import { useAuth } from '@/context/auth-context'
@@ -58,6 +71,19 @@ type ReportOverview = {
   provenance: ReportProvenance
 }
 
+type GenerateStep = {
+  step: 'collecting' | 'hashing' | 'anchoring' | 'done' | 'exists' | 'error'
+  message: string
+  progress: number
+}
+
+type GenerateResult = {
+  overview: ReportOverview
+  anchor: ReportAnchor
+  report_hash: string
+  already_exists: boolean
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const SEVERITY_STYLES: Record<string, string> = {
@@ -84,6 +110,15 @@ const STATUS_LABELS: Record<TxStatus, string> = {
   confirmed: 'Verified on-chain',
   pending: 'Pending',
   failed: 'Failed',
+}
+
+const STEP_ICONS: Record<string, string> = {
+  collecting: '📊',
+  hashing: '🔐',
+  anchoring: '⛓️',
+  done: '✅',
+  exists: '♻️',
+  error: '❌',
 }
 
 const fmtDate = (iso: string) => {
@@ -116,6 +151,147 @@ const CopyButton = ({ value }: { value: string }) => {
     >
       {copied ? <FiCheck size={11} className='text-emerald-500' /> : <FiCopy size={11} />}
     </button>
+  )
+}
+
+// ── GenerateDrawer ────────────────────────────────────────────────────────────
+
+type GenerateDrawerProps = {
+  open: boolean
+  steps: GenerateStep[]
+  result: GenerateResult | null
+  error: string
+  onClose: () => void
+}
+
+const GenerateDrawer = ({ open, steps, result, error, onClose }: GenerateDrawerProps) => {
+  if (!open) return null
+
+  const lastStep = steps.at(-1)
+  const progress = lastStep?.progress ?? 0
+  const isDone = lastStep?.step === 'done' || lastStep?.step === 'exists'
+  const isFailed = lastStep?.step === 'error' || !!error
+
+  return (
+    <div className='fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm'>
+      <div className='w-full max-w-lg mx-4 rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden'>
+        {/* Header */}
+        <div className='flex items-center justify-between px-6 py-4 border-b border-slate-100'>
+          <div className='flex items-center gap-2'>
+            <FiLock size={15} className='text-slate-700' />
+            <h3 className='text-sm font-semibold text-slate-900'>Generating & Anchoring Report</h3>
+          </div>
+          {(isDone || isFailed) && (
+            <button
+              type='button'
+              onClick={onClose}
+              aria-label='Close'
+              className='rounded-md p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors'
+            >
+              <FiX size={14} />
+            </button>
+          )}
+        </div>
+
+        {/* Progress bar */}
+        <div className='h-1 bg-slate-100'>
+          <div
+            className={`h-full transition-all duration-500 ${isFailed ? 'bg-rose-400' : 'bg-slate-900'}`}
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+
+        {/* Steps */}
+        <div className='px-6 py-4 space-y-3 min-h-[140px]'>
+          {steps.length === 0 && (
+            <div className='flex items-center gap-3 py-2'>
+              <div className='h-4 w-4 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin' />
+              <span className='text-sm text-slate-500'>Starting…</span>
+            </div>
+          )}
+          {steps.map((s, i) => {
+            const isActive = i === steps.length - 1 && !isDone && !isFailed
+            return (
+              <div key={i} className='flex items-start gap-3'>
+                <span className='text-base mt-0.5 shrink-0'>
+                  {isActive ? (
+                    <span className='inline-block h-4 w-4 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin mt-1' />
+                  ) : (
+                    STEP_ICONS[s.step] ?? '•'
+                  )}
+                </span>
+                <div>
+                  <p className={`text-sm font-medium ${isActive ? 'text-slate-700' : 'text-slate-900'}`}>
+                    {s.message}
+                  </p>
+                  <p className='text-xs text-slate-400 capitalize'>{s.step}</p>
+                </div>
+              </div>
+            )
+          })}
+          {error && (
+            <p className='text-sm text-rose-600 rounded-lg bg-rose-50 border border-rose-200 px-3 py-2'>{error}</p>
+          )}
+        </div>
+
+        {/* Result anchor card */}
+        {result && (
+          <div className='mx-6 mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4'>
+            <div className='flex items-center gap-2 mb-3'>
+              <FiShield size={13} className='text-emerald-600' />
+              <span className='text-xs font-semibold text-emerald-800'>
+                {result.already_exists ? 'Already anchored' : 'Successfully anchored'}
+              </span>
+              <span
+                className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${STATUS_STYLES[result.anchor.status]}`}
+              >
+                {STATUS_LABELS[result.anchor.status]}
+              </span>
+            </div>
+            <div className='space-y-1.5 text-xs font-mono text-slate-600'>
+              <div className='flex items-center gap-1'>
+                <span className='text-slate-400 shrink-0 w-20'>report hash</span>
+                <span className='truncate'>{fmtHash(result.report_hash, 20)}</span>
+                <CopyButton value={result.report_hash} />
+              </div>
+              <div className='flex items-center gap-1'>
+                <span className='text-slate-400 shrink-0 w-20'>tx hash</span>
+                <span className='truncate'>{fmtHash(result.anchor.tx_hash, 20)}</span>
+                <CopyButton value={result.anchor.tx_hash} />
+              </div>
+              <div className='flex items-center gap-1'>
+                <span className='text-slate-400 shrink-0 w-20'>period</span>
+                <span>{result.anchor.period}</span>
+              </div>
+            </div>
+            {result.anchor.explorer_url && (
+              <a
+                href={result.anchor.explorer_url}
+                target='_blank'
+                rel='noreferrer'
+                className='mt-3 inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 underline underline-offset-2'
+              >
+                <FiExternalLink size={11} />
+                View transaction on explorer
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* Footer */}
+        {(isDone || isFailed) && (
+          <div className='px-6 pb-5'>
+            <button
+              type='button'
+              onClick={onClose}
+              className='w-full rounded-lg bg-slate-900 py-2 text-sm font-medium text-white hover:bg-slate-800 transition-colors'
+            >
+              Close
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -172,6 +348,7 @@ const ReportsPage = () => {
   const isManager = activeRole === 'Manager'
 
   const activeHouseId = activeOrganizationId ?? 'house-1'
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
   const [overview, setOverview] = useState<ReportOverview | null>(null)
   const [anchors, setAnchors] = useState<ReportAnchor[]>([])
@@ -179,8 +356,23 @@ const ReportsPage = () => {
   const [isLoadingAnchors, setIsLoadingAnchors] = useState(false)
   const [overviewError, setOverviewError] = useState('')
   const [anchorsError, setAnchorsError] = useState('')
+
+  // legacy anchor state (kept for manual anchor button)
   const [isAnchoring, setIsAnchoring] = useState(false)
   const [anchorError, setAnchorError] = useState('')
+
+  // PDF download state (loading state kept for UX consistency)
+  const [isDownloadingPdf] = useState(false)
+  const [pdfError] = useState('')
+
+  // generate & anchor state
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [generateSteps, setGenerateSteps] = useState<GenerateStep[]>([])
+  const [generateResult, setGenerateResult] = useState<GenerateResult | null>(null)
+  const [generateError, setGenerateError] = useState('')
+  const [isGenerating, setIsGenerating] = useState(false)
+  const generateAbortRef = useRef<AbortController | null>(null)
+
   const [selectedPeriod, setSelectedPeriod] = useState<string | 'all'>('all')
 
   const filteredRows = useMemo(() => {
@@ -189,10 +381,7 @@ const ReportsPage = () => {
     return overview.monthly_rows.filter((row) => row.period === selectedPeriod)
   }, [overview, selectedPeriod])
 
-  const allAnomalies = useMemo(() => {
-    if (!overview) return []
-    return overview.anomalies
-  }, [overview])
+  const allAnomalies = useMemo(() => overview?.anomalies ?? [], [overview])
 
   const latestPeriod = useMemo(
     () => overview?.monthly_rows.at(-1)?.period ?? new Date().toISOString().slice(0, 7),
@@ -236,6 +425,12 @@ const ReportsPage = () => {
     void loadAnchors()
   }, [loadOverview, loadAnchors])
 
+  // ── PDF download — opens the beautiful print page in a new tab ─────────────
+  const handleDownloadPdf = useCallback(() => {
+    window.open('/reports/print', '_blank', 'noopener,noreferrer')
+  }, [])
+
+  // ── Legacy manual anchor ────────────────────────────────────────────────────
   const handleAnchor = async () => {
     if (!accessToken) return
     setIsAnchoring(true)
@@ -254,6 +449,96 @@ const ReportsPage = () => {
     }
   }
 
+  // ── Generate & Anchor (SSE) ─────────────────────────────────────────────────
+  const handleGenerate = useCallback(async () => {
+    if (!accessToken || isGenerating) return
+
+    generateAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    generateAbortRef.current = ctrl
+
+    setDrawerOpen(true)
+    setGenerateSteps([])
+    setGenerateResult(null)
+    setGenerateError('')
+    setIsGenerating(true)
+
+    try {
+      const res = await fetch(`${API_BASE}/houses/${activeHouseId}/reports/generate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'text/event-stream',
+        },
+        signal: ctrl.signal,
+      })
+
+      if (!res.ok) {
+        const text = await res.text()
+        setGenerateError(text || 'Request failed')
+        setIsGenerating(false)
+        return
+      }
+
+      const reader = res.body?.getReader()
+      if (!reader) {
+        setGenerateError('No response body')
+        setIsGenerating(false)
+        return
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let currentEvent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (line.startsWith('event:')) {
+            currentEvent = line.slice(6).trim()
+          } else if (line.startsWith('data:')) {
+            const raw = line.slice(5).trim()
+            try {
+              const parsed = JSON.parse(raw)
+              if (currentEvent === 'step') {
+                setGenerateSteps((prev) => [...prev, parsed as GenerateStep])
+              } else if (currentEvent === 'result') {
+                setGenerateResult(parsed as GenerateResult)
+                await loadAnchors()
+                if (parsed.overview) setOverview(parsed.overview as ReportOverview)
+              } else if (currentEvent === 'error') {
+                setGenerateError(parsed.message ?? 'Unknown error')
+              }
+            } catch {
+              // malformed JSON line — skip
+            }
+            currentEvent = ''
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        setGenerateError((err as Error).message ?? 'Stream failed')
+      }
+    } finally {
+      setIsGenerating(false)
+    }
+  }, [accessToken, activeHouseId, API_BASE, isGenerating, loadAnchors])
+
+  const handleDrawerClose = useCallback(() => {
+    if (isGenerating) {
+      generateAbortRef.current?.abort()
+      setIsGenerating(false)
+    }
+    setDrawerOpen(false)
+  }, [isGenerating])
+
   useEffect(() => {
     void loadOverview()
     void loadAnchors()
@@ -264,6 +549,14 @@ const ReportsPage = () => {
 
   return (
     <AppShell title='Transparency Reports'>
+      <GenerateDrawer
+        open={drawerOpen}
+        steps={generateSteps}
+        result={generateResult}
+        error={generateError}
+        onClose={handleDrawerClose}
+      />
+
       {/* Header */}
       <div className='flex flex-wrap items-start justify-between gap-3 mb-1'>
         <div>
@@ -271,17 +564,55 @@ const ReportsPage = () => {
             Full audit trail for residents — monthly consumption, anomaly log, and on-chain proof anchors.
           </p>
         </div>
-        <button
-          type='button'
-          onClick={handleRefresh}
-          disabled={isLoadingOverview || isLoadingAnchors}
-          aria-label='Refresh reports'
-          className='flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors'
-        >
-          <FiRefreshCw size={12} className={isLoadingOverview ? 'animate-spin' : ''} />
-          Refresh
-        </button>
+        <div className='flex items-center gap-2'>
+          {isManager && (
+            <button
+              type='button'
+              onClick={handleGenerate}
+              disabled={isGenerating}
+              aria-label='Generate and anchor report'
+              className='flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 transition-colors'
+            >
+              <FiZap size={11} className={isGenerating ? 'animate-pulse' : ''} />
+              {isGenerating ? 'Generating…' : 'Generate & Anchor'}
+            </button>
+          )}
+          <button
+            type='button'
+            onClick={handleDownloadPdf}
+            disabled={isDownloadingPdf}
+            aria-label='Download PDF report'
+            className='flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors'
+          >
+            <FiDownload size={12} className={isDownloadingPdf ? 'animate-bounce' : ''} />
+            {isDownloadingPdf ? 'Preparing…' : 'Download PDF'}
+          </button>
+          <button
+            type='button'
+            onClick={handleRefresh}
+            disabled={isLoadingOverview || isLoadingAnchors}
+            aria-label='Refresh reports'
+            className='flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors'
+          >
+            <FiRefreshCw size={12} className={isLoadingOverview ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
       </div>
+
+      {/* How it works banner */}
+      {isManager && (
+        <div className='mt-4 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3'>
+          <FiLock size={14} className='mt-0.5 shrink-0 text-slate-500' />
+          <p className='text-xs text-slate-600 leading-relaxed'>
+            <span className='font-semibold text-slate-800'>Generate &amp; Anchor</span> computes a canonical SHA-256
+            hash of the current report, then broadcasts a self-transfer transaction to{' '}
+            <span className='font-medium'>Polygon Amoy</span> with the hash encoded in the{' '}
+            <code className='rounded bg-slate-200 px-1'>data</code> field — permanently sealing the report on-chain and
+            making any future tampering instantly detectable.
+          </p>
+        </div>
+      )}
 
       {/* KPI Row */}
       {overview && (
@@ -303,6 +634,10 @@ const ReportsPage = () => {
             <p className={`text-xl font-bold ${highCount > 0 ? 'text-rose-600' : 'text-slate-900'}`}>{highCount}</p>
           </div>
         </div>
+      )}
+
+      {pdfError && (
+        <p className='mt-3 rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700'>{pdfError}</p>
       )}
 
       {overviewError && (
@@ -418,21 +753,22 @@ const ReportsPage = () => {
           <div className='flex items-center gap-2'>
             <FiShield size={14} className='text-slate-500' />
             <h2 className='text-sm font-semibold text-slate-900'>On-chain proof history</h2>
+            {anchors.length > 0 && (
+              <span className='rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600'>
+                {anchors.length}
+              </span>
+            )}
           </div>
-          {isManager ? (
+          {isManager && (
             <button
               type='button'
               onClick={handleAnchor}
               disabled={isAnchoring || !accessToken}
-              className='flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 transition-colors'
+              className='flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 transition-colors'
             >
               <FiShield size={11} />
-              {isAnchoring ? 'Anchoring…' : 'Anchor latest report'}
+              {isAnchoring ? 'Anchoring…' : 'Anchor latest'}
             </button>
-          ) : (
-            <span className='rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500'>
-              Verification only
-            </span>
           )}
         </div>
 
@@ -450,8 +786,11 @@ const ReportsPage = () => {
         {isLoadingAnchors ? (
           <div className='h-36 flex items-center justify-center text-sm text-slate-400'>Loading proof history…</div>
         ) : anchors.length === 0 ? (
-          <div className='h-24 flex items-center justify-center text-sm text-slate-400'>
-            No anchored reports yet — manager can anchor a report above
+          <div className='h-24 flex items-center justify-center flex-col gap-2'>
+            <p className='text-sm text-slate-400'>No anchored reports yet</p>
+            {isManager && (
+              <p className='text-xs text-slate-400'>Use "Generate &amp; Anchor" above to seal the current report on-chain</p>
+            )}
           </div>
         ) : (
           <div className='h-[260px] overflow-auto divide-y divide-slate-50'>

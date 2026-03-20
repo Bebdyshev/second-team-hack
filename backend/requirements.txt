@@ -16,6 +16,7 @@ eth-account==0.13.7
 email_validator==2.2.0
 et_xmlfile==2.0.0
 fastapi==0.115.2
+fpdf2==2.8.3
 google-ai-generativelanguage==0.6.10
 google-api-core==2.28.1
 google-api-python-client==2.187.0

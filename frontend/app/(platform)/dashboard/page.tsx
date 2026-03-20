@@ -52,9 +52,10 @@ type DynamicsResponse = {
   dynamics: Array<{ label: string; value: number }>
 }
 
-type ManagerActionProof = {
+type ReportAnchor = {
   id: string
-  action_type: string
+  period: string
+  report_hash: string
   status: 'pending' | 'confirmed' | 'failed'
   tx_hash: string
   explorer_url: string
@@ -206,7 +207,7 @@ const DashboardPage = () => {
   const [apartmentScore, setApartmentScore] = useState<number | null>(null)
   const [electricityDelta, setElectricityDelta] = useState(0)
   const [waterDelta, setWaterDelta] = useState(0)
-  const [proofs, setProofs] = useState<ManagerActionProof[]>([])
+  const [anchors, setAnchors] = useState<ReportAnchor[]>([])
   const [sparkElec, setSparkElec] = useState<Array<{ label: string; value: number }>>([])
   const [sparkWater, setSparkWater] = useState<Array<{ label: string; value: number }>>([])
   const [pageError, setPageError] = useState('')
@@ -221,13 +222,13 @@ const DashboardPage = () => {
       setPageError('')
       try {
         if (isResident && myApartmentId) {
-          const [aptSummary, elecDyn, waterDyn, alertsRes, metersRes, proofsRes] = await Promise.all([
+          const [aptSummary, elecDyn, waterDyn, alertsRes, metersRes, anchorsRes] = await Promise.all([
             apiRequest<ApartmentSummaryResponse>(`/apartments/${myApartmentId}/summary`, { token: accessToken }),
             apiRequest<DynamicsResponse>(`/apartments/${myApartmentId}/dynamics?resource=electricity&period=24h`, { token: accessToken }),
             apiRequest<DynamicsResponse>(`/apartments/${myApartmentId}/dynamics?resource=water&period=24h`, { token: accessToken }),
             apiRequest<ResourceAlert[]>(`/alerts?house_id=${activeHouseId}`, { token: accessToken }),
             apiRequest<MeterItem[]>(`/meters?house_id=${activeHouseId}`, { token: accessToken }),
-            apiRequest<ManagerActionProof[]>(`/manager-actions/proofs?house_id=${activeHouseId}`, { token: accessToken }),
+            apiRequest<ReportAnchor[]>(`/houses/${activeHouseId}/reports/anchors`, { token: accessToken }).catch(() => []),
           ])
           const elecVals = elecDyn.dynamics.map((d) => d.value)
           const waterVals = waterDyn.dynamics.map((d) => d.value)
@@ -242,7 +243,7 @@ const DashboardPage = () => {
           setApartmentScore(aptSummary.apartment.score)
           setAlerts(alertsRes)
           setMeters(metersRes)
-          setProofs(proofsRes)
+          setAnchors(anchorsRes)
           setSparkElec(elecDyn.dynamics)
           setSparkWater(waterDyn.dynamics)
           const pe = elecVals[0] ?? 0; const ee = elecVals.at(-1) ?? 0
@@ -250,12 +251,12 @@ const DashboardPage = () => {
           setElectricityDelta(pe === 0 ? 0 : Number((((ee - pe) / pe) * 100).toFixed(1)))
           setWaterDelta(pw === 0 ? 0 : Number((((ew - pw) / pw) * 100).toFixed(1)))
         } else {
-          const [housesRes, summaryRes, alertsRes, metersRes, proofsRes, elecDyn, waterDyn] = await Promise.all([
+          const [housesRes, summaryRes, alertsRes, metersRes, anchorsRes, elecDyn, waterDyn] = await Promise.all([
             apiRequest<HouseItem[]>('/houses', { token: accessToken }),
             apiRequest<HouseSummary>(`/houses/${activeHouseId}/summary`, { token: accessToken }),
             apiRequest<ResourceAlert[]>(`/alerts?house_id=${activeHouseId}`, { token: accessToken }),
             apiRequest<MeterItem[]>(`/meters?house_id=${activeHouseId}`, { token: accessToken }),
-            apiRequest<ManagerActionProof[]>(`/manager-actions/proofs?house_id=${activeHouseId}`, { token: accessToken }),
+            apiRequest<ReportAnchor[]>(`/houses/${activeHouseId}/reports/anchors`, { token: accessToken }).catch(() => []),
             apiRequest<DynamicsResponse>(`/houses/${activeHouseId}/dynamics?resource=electricity&period=24h`, { token: accessToken }),
             apiRequest<DynamicsResponse>(`/houses/${activeHouseId}/dynamics?resource=water&period=24h`, { token: accessToken }),
           ])
@@ -263,7 +264,7 @@ const DashboardPage = () => {
           setSummary(summaryRes)
           setAlerts(alertsRes)
           setMeters(metersRes)
-          setProofs(proofsRes)
+          setAnchors(anchorsRes)
           setSparkElec(elecDyn.dynamics)
           setSparkWater(waterDyn.dynamics)
           const pe = elecDyn.dynamics[0]?.value ?? 0; const ee = elecDyn.dynamics.at(-1)?.value ?? 0
@@ -423,49 +424,75 @@ const DashboardPage = () => {
           )}
         </div>
 
-        {/* Proofs / Meters */}
+        {/* Report Anchors */}
         <div className='flex min-h-0 flex-col rounded-2xl border border-slate-200 bg-white p-5'>
           <SectionHeader
-            title={isResident ? 'Verified proofs' : 'Manager actions proof'}
-            count={proofs.length}
+            title='Report anchors'
+            count={anchors.length}
             href='/reports'
           />
-          {proofs.length === 0 ? (
+          {anchors.length === 0 ? (
             <div className='flex flex-col items-center justify-center gap-1.5 py-8 text-center'>
-              <p className='text-sm text-slate-400'>No proofs anchored yet</p>
+              <p className='text-sm text-slate-400'>No anchored reports yet</p>
               {!isResident && (
-                <Link href='/reports' className='text-xs text-blue-600 hover:underline'>Anchor a report →</Link>
+                <Link href='/reports' className='text-xs text-blue-600 hover:underline'>
+                  Generate &amp; Anchor →
+                </Link>
               )}
             </div>
           ) : (
             <div className='flex-1 space-y-2 overflow-auto pr-1'>
-              {proofs.slice(0, 4).map((proof) => (
-                <div key={proof.id} className='rounded-xl border border-slate-100 p-3'>
-                  <div className='flex items-center justify-between gap-2'>
-                    <p className='truncate text-xs font-semibold text-slate-800'>{proof.action_type}</p>
+              {anchors.slice(0, 4).map((anchor) => (
+                <div
+                  key={anchor.id}
+                  className={`rounded-xl border p-3 ${
+                    anchor.status === 'confirmed'
+                      ? 'border-emerald-100 bg-emerald-50/50'
+                      : anchor.status === 'failed'
+                      ? 'border-rose-100 bg-rose-50/50'
+                      : 'border-slate-100'
+                  }`}
+                >
+                  <div className='flex items-center justify-between gap-2 mb-1.5'>
+                    <div className='flex items-center gap-1.5'>
+                      {anchor.status === 'confirmed' && (
+                        <svg width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='#16a34a' strokeWidth='2.5' strokeLinecap='round' strokeLinejoin='round'>
+                          <path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' />
+                          <polyline points='9 12 11 14 15 10' />
+                        </svg>
+                      )}
+                      <p className='text-xs font-semibold text-slate-800'>Period {anchor.period}</p>
+                    </div>
                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                      proof.status === 'confirmed' ? 'bg-emerald-100 text-emerald-700' :
-                      proof.status === 'pending'   ? 'bg-amber-100 text-amber-700' :
-                                                     'bg-rose-100 text-rose-700'
+                      anchor.status === 'confirmed' ? 'bg-emerald-100 text-emerald-700' :
+                      anchor.status === 'pending'   ? 'bg-amber-100 text-amber-700' :
+                                                      'bg-rose-100 text-rose-700'
                     }`}>
-                      {proof.status === 'confirmed' ? 'On-chain' : proof.status}
+                      {anchor.status === 'confirmed' ? 'On-chain' : anchor.status}
                     </span>
                   </div>
-                  {proof.explorer_url && (
+                  <p className='font-mono text-[10px] text-slate-400 truncate'>
+                    {anchor.report_hash.slice(0, 20)}…
+                  </p>
+                  {anchor.explorer_url ? (
                     <a
-                      href={proof.explorer_url}
+                      href={anchor.explorer_url}
                       target='_blank'
                       rel='noreferrer'
-                      className='mt-1.5 inline-block font-mono text-[10px] text-blue-600 hover:underline'
+                      className='mt-1 inline-block font-mono text-[10px] text-blue-600 hover:underline truncate max-w-full'
                     >
-                      {proof.tx_hash.slice(0, 16)}…
+                      tx: {anchor.tx_hash.slice(0, 16)}…
                     </a>
+                  ) : (
+                    <p className='mt-1 font-mono text-[10px] text-slate-400 truncate'>
+                      tx: {anchor.tx_hash.slice(0, 16)}…
+                    </p>
                   )}
                 </div>
               ))}
-              {proofs.length > 4 && (
-                <Link href='/reports' className='block text-center text-xs text-slate-400 hover:text-blue-600 pt-1'>
-                  +{proofs.length - 4} more →
+              {anchors.length > 4 && (
+                <Link href='/reports' className='block pt-1 text-center text-xs text-slate-400 hover:text-blue-600'>
+                  +{anchors.length - 4} more →
                 </Link>
               )}
             </div>

@@ -357,3 +357,16 @@ class ReportOverview(BaseModel):
     monthly_rows: list[MonthlyReportRow]
     anomalies: list[ReportAnomalyItem]
     provenance: ReportProvenance
+
+
+class GenerateReportStep(BaseModel):
+    step: str        # "collecting" | "hashing" | "anchoring" | "done" | "exists" | "error"
+    message: str
+    progress: int    # 0–100
+
+
+class GenerateReportResponse(BaseModel):
+    overview: ReportOverview
+    anchor: ReportAnchor
+    report_hash: str
+    already_exists: bool

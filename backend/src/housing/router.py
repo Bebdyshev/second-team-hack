@@ -10,6 +10,7 @@ from uuid import uuid4
 import json as _json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from fastapi.responses import Response, StreamingResponse
 
 from src.housing import gemini_client, groq_client, store, web3
@@ -1329,6 +1330,89 @@ def house_analytics_reasoning_stream(
 
     return StreamingResponse(
         generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Chat stream
+# ---------------------------------------------------------------------------
+
+class _ChatMsg(BaseModel):
+    role: str
+    content: str
+
+
+class _ChatRequest(BaseModel):
+    messages: list[_ChatMsg]
+    max_tokens: int = 1024
+    temperature: float = 0.7
+
+
+@router.post("/chat/stream")
+def chat_stream(
+    payload: _ChatRequest,
+    user: dict[str, str] = Depends(get_current_user),
+) -> StreamingResponse:
+    """Proxy a Groq streaming chat completion through the backend.
+
+    The mobile app cannot use response.body.getReader() (Web Streams not supported in
+    React Native fetch). By routing through here we also keep the API key server-side.
+
+    SSE events emitted:
+      data: {"token": "..."}
+      data: [DONE]
+      data: {"error": "..."}
+    """
+    api_key = groq_client._load_api_key()
+    if not api_key:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI service unavailable")
+
+    import httpx as _httpx
+
+    messages_payload = [{"role": m.role, "content": m.content} for m in payload.messages]
+
+    def _generate():
+        try:
+            with _httpx.Client(timeout=90.0) as client:
+                with client.stream(
+                    "POST",
+                    groq_client.GROQ_API_URL,
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": groq_client.GROQ_MODEL,
+                        "messages": messages_payload,
+                        "stream": True,
+                        "max_tokens": payload.max_tokens,
+                        "temperature": payload.temperature,
+                    },
+                ) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data = line[6:].strip()
+                        if data == "[DONE]":
+                            yield "data: [DONE]\n\n"
+                            return
+                        try:
+                            chunk = _json.loads(data)
+                            token = (chunk.get("choices") or [{}])[0].get("delta", {}).get("content", "")
+                            if token:
+                                yield f"data: {_json.dumps({'token': token})}\n\n"
+                        except (ValueError, KeyError):
+                            continue
+        except Exception as exc:
+            logger.error("chat_stream_error user=%s error=%s", user.get("id"), exc)
+            yield f"data: {_json.dumps({'error': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        _generate(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

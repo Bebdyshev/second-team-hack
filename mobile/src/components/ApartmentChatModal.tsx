@@ -13,6 +13,7 @@ import {
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { type ChatMessage, streamGroqChat } from '../lib/groq-chat'
+import { useAuth } from '../context/AuthContext'
 
 export type ContextItem = {
   id: string
@@ -85,10 +86,12 @@ export default function ApartmentChatModal({
   onRemoveContext,
   onClose,
 }: Props) {
+  const { accessToken } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const scrollRef = useRef<ScrollView>(null)
+  const abortRef = useRef<(() => void) | null>(null)
 
   const dotAnim = useRef(new Animated.Value(0)).current
 
@@ -109,10 +112,13 @@ export default function ApartmentChatModal({
   }, [])
 
   const sendMessage = useCallback(
-    async (text?: string) => {
-      if (!apartment) return
+    (text?: string) => {
+      if (!apartment || !accessToken) return
       const content = (text ?? input).trim()
       if (!content || loading) return
+
+      // Abort any in-flight request
+      abortRef.current?.()
 
       const userMsg: Message = { role: 'user', content }
       const nextMessages = [...messages, userMsg]
@@ -126,10 +132,10 @@ export default function ApartmentChatModal({
         ...nextMessages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
       ]
 
-      // Append empty assistant message for streaming
+      // Append empty assistant placeholder for streaming
       setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
 
-      await streamGroqChat(
+      abortRef.current = streamGroqChat(
         groqHistory,
         (chunk) => {
           setMessages((prev) => {
@@ -144,15 +150,29 @@ export default function ApartmentChatModal({
         },
         () => setLoading(false),
         (errorMsg) => {
-          setMessages((prev) => [...prev, { role: 'assistant', content: errorMsg }])
+          setMessages((prev) => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+            if (last?.role === 'assistant' && last.content === '') {
+              updated[updated.length - 1] = { ...last, content: `Error: ${errorMsg}` }
+            } else {
+              updated.push({ role: 'assistant', content: `Error: ${errorMsg}` })
+            }
+            return updated
+          })
           setLoading(false)
         },
+        { accessToken },
       )
     },
-    [apartment, contextItems, input, loading, messages, scrollToEnd],
+    [accessToken, apartment, contextItems, input, loading, messages, scrollToEnd],
   )
 
-  const handleClearChat = () => setMessages([])
+  const handleClearChat = () => {
+    abortRef.current?.()
+    setMessages([])
+    setLoading(false)
+  }
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>

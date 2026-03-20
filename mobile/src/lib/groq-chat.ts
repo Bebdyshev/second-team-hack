@@ -1,81 +1,90 @@
+import { getApiBaseUrl } from '../config'
+
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant'
   content: string
 }
 
-const MODELS = [
-  'llama-3.3-70b-versatile',
-  'meta-llama/llama-4-scout-17b-16e-instruct',
-  'llama-3.1-8b-instant',
-] as const
-
-function getGroqKey(): string {
-  return process.env.EXPO_PUBLIC_GROQ_API_KEY ?? ''
-}
-
 /**
- * Streams a chat completion from Groq.
- * Calls `onDelta` for each text chunk and `onDone` when finished.
+ * Streams a chat completion through the backend /chat/stream endpoint.
+ *
+ * React Native's fetch does NOT support response.body.getReader() (Web Streams API),
+ * so we use XMLHttpRequest.onprogress instead — same pattern used in AlertsScreen.
+ *
+ * Returns a cancel function that aborts the request when called.
  */
-export const streamGroqChat = async (
+export const streamGroqChat = (
   messages: ChatMessage[],
   onDelta: (chunk: string) => void,
   onDone: () => void,
   onError: (msg: string) => void,
-): Promise<void> => {
-  const apiKey = getGroqKey()
-  if (!apiKey) {
-    onError('Groq API key not configured')
-    return
-  }
+  opts: { accessToken: string },
+): (() => void) => {
+  const url = `${getApiBaseUrl()}/chat/stream`
+  let processedLen = 0
+  let finished = false
 
-  for (const model of MODELS) {
-    try {
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          stream: true,
-          max_tokens: 1024,
-          temperature: 0.7,
-        }),
-      })
+  const processText = (text: string) => {
+    const newChunk = text.slice(processedLen)
+    processedLen = text.length
+    if (!newChunk) return
 
-      if (!response.ok) {
-        continue
-      }
-
-      const reader = response.body?.getReader()
-      if (!reader) { onError('No response body'); return }
-
-      const decoder = new TextDecoder()
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        for (const line of decoder.decode(value).split('\n')) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6).trim()
-          if (data === '[DONE]') continue
-          try {
-            const delta = JSON.parse(data)?.choices?.[0]?.delta?.content
-            if (delta) onDelta(delta)
-          } catch { /* skip malformed SSE line */ }
+    for (const line of newChunk.split('\n')) {
+      if (!line.startsWith('data: ')) continue
+      const data = line.slice(6).trim()
+      if (data === '[DONE]') {
+        if (!finished) {
+          finished = true
+          onDone()
         }
+        return
       }
-
-      onDone()
-      return
-    } catch {
-      continue
+      try {
+        const parsed = JSON.parse(data) as { token?: string; error?: string }
+        if (parsed.error) {
+          if (!finished) {
+            finished = true
+            onError(parsed.error)
+          }
+          return
+        }
+        if (parsed.token) {
+          onDelta(parsed.token)
+        }
+      } catch {
+        // skip malformed SSE line
+      }
     }
   }
 
-  onError('Could not reach AI — check your connection and try again.')
+  const xhr = new XMLHttpRequest()
+  xhr.open('POST', url)
+  xhr.setRequestHeader('Authorization', `Bearer ${opts.accessToken}`)
+  xhr.setRequestHeader('Content-Type', 'application/json')
+  xhr.setRequestHeader('Accept', 'text/event-stream')
+
+  xhr.onprogress = () => processText(xhr.responseText)
+
+  xhr.onload = () => {
+    processText(xhr.responseText)
+    if (!finished) {
+      finished = true
+      onDone()
+    }
+  }
+
+  xhr.onerror = () => {
+    if (!finished) {
+      finished = true
+      onError('Network error — check your connection')
+    }
+  }
+
+  xhr.onabort = () => {
+    finished = true
+  }
+
+  xhr.send(JSON.stringify({ messages, max_tokens: 1024, temperature: 0.7 }))
+
+  return () => xhr.abort()
 }

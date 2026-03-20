@@ -7,7 +7,7 @@ React Native (Expo) app for ResMonitor — runs on **iPhone** and **Android**.
 - Node.js 18+
 - npm or yarn
 - **Expo Go** app on your iPhone or Android device (for testing)
-- Backend running at `http://localhost:8000` (or your machine's IP for physical device)
+- Backend reachable from your phone/emulator (see below — **not** only `127.0.0.1` on a real device)
 
 ## Quick Start
 
@@ -20,11 +20,17 @@ npm install
 
 ### 2. Start the backend (in another terminal)
 
+The API must listen on **all interfaces** so a phone on the same Wi‑Fi can connect. Default `uvicorn` host is `127.0.0.1` — that **blocks** LAN access.
+
 ```bash
 cd backend
 source .venv/bin/activate  # or venv\Scripts\activate on Windows
-uvicorn src.app:app --reload --port 8000
+uvicorn src.app:app --reload --port 8000 --host 0.0.0.0
 ```
+
+Or use `backend/START_BACKEND.command` (macOS) — it already uses `--host 0.0.0.0` and prints your LAN IP.
+
+**Check:** from the phone’s Safari, open `http://YOUR_MAC_IP:8000/docs` — if it does not load, fix firewall / Wi‑Fi / host before debugging the app.
 
 ### 3. Run the mobile app
 
@@ -48,16 +54,16 @@ npm start
 
 ### Physical device: API URL
 
-When testing on a **physical device**, `localhost` points to the phone, not your Mac. Update the API base URL:
+On a **physical phone**, `localhost` / `127.0.0.1` is the **phone itself**, not your computer. The app auto-uses the Expo dev server host (your Mac’s LAN IP) when possible; if requests fail (`Network request failed` on `/auth/refresh` or chat):
 
-1. Find your Mac's IP: `ipconfig getifaddr en0` (or `en1` if on Ethernet)
-2. Edit `mobile/src/config.ts` and set:
-   ```ts
-   export const API_BASE_URL = 'http://YOUR_IP:8000';
-   ```
-   Example: `http://192.168.1.100:8000`
+1. Mac and phone on the **same Wi‑Fi** (guest networks often isolate clients).
+2. Backend: `uvicorn ... --host 0.0.0.0` (see above).
+3. **Set the API URL in the app:** Login screen → **“Network failed? Set API server”** → enter your Mac’s IP, e.g. `192.168.1.105` (find it: System Settings → Network, or `ipconfig getifaddr en0`).
+4. Optional: copy `mobile/.env.example` to `mobile/.env` and set  
+   `EXPO_PUBLIC_API_BASE_URL=http://YOUR_MAC_IP:8000`  
+   then restart Expo (`npx expo start -c`).
 
-3. Restart the Expo dev server
+Saved URL is stored in AsyncStorage; change it again if your Mac gets a new IP on another network.
 
 ## Screens
 
@@ -90,7 +96,7 @@ npm run android # Open in Android emulator
 mobile/
 ├── App.tsx              # Entry, providers, navigation
 ├── src/
-│   ├── config.ts        # API_BASE_URL — change for physical device
+│   ├── config.ts        # API base URL (Expo LAN / .env / login override)
 │   ├── context/
 │   │   └── AuthContext.tsx
 │   ├── lib/

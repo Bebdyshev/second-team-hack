@@ -14,6 +14,7 @@ import {
 import { FiRefreshCw } from 'react-icons/fi'
 
 import { AppShell } from '@/components/app-shell'
+import { Spinner } from '@/components/ui/spinner'
 import { TextHighlighter } from '@/components/fancy/text/text-highlighter'
 import { useAuth } from '@/context/auth-context'
 import { ApiError, API_BASE_URL, apiRequest } from '@/lib/api'
@@ -495,10 +496,16 @@ const KnowledgeBasePage = () => {
       )}
 
       {loading ? (
-        <div className='space-y-3'>
-          {[1, 2, 3].map((i) => (
-            <div key={i} className='h-48 animate-pulse rounded-xl border border-slate-100 bg-slate-50' />
-          ))}
+        <div className='flex flex-col items-center gap-6 py-8'>
+          <div className='flex flex-col items-center gap-3'>
+            <Spinner className='size-8 text-slate-700' />
+            <p className='text-sm text-slate-500'>Loading analytics…</p>
+          </div>
+          <div className='w-full space-y-3'>
+            {[1, 2, 3].map((i) => (
+              <div key={i} className='h-48 animate-pulse rounded-xl border border-slate-100 bg-slate-50' />
+            ))}
+          </div>
         </div>
       ) : (
         <div className='space-y-5'>

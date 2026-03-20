@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import { Spinner } from '@/components/ui/spinner'
 import { useAuth } from '@/context/auth-context'
 import { apiRequest, ApiError } from '@/lib/api'
 
@@ -218,7 +219,7 @@ export default function ReportPrintPage() {
   if (loading) {
     return (
       <div className='min-h-screen flex flex-col items-center justify-center gap-4 bg-white'>
-        <div className='h-8 w-8 rounded-full border-2 border-slate-200 border-t-slate-700 animate-spin' />
+        <Spinner className='size-8 text-slate-700' />
         <p className='text-sm text-slate-500'>Preparing report…</p>
       </div>
     )
